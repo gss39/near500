@@ -28,6 +28,7 @@ import {
   LiveProximityRelay,
   RelayPacket,
   getHaversineDistanceMeters,
+  getProximityDistanceMeters,
   getCompassDirection,
 } from './utils/liveRelay';
 
@@ -38,6 +39,27 @@ interface RelayPeerState {
   lastSeenAt: number;
 }
 
+const PEER_CACHE_KEY = 'near500_relay_peers_cache_v2';
+const PEER_ACTIVE_TTL_MS = 180 * 1000; // 3 minutes active retention to prevent show/hide flicker
+
+function loadCachedRelayPeers(): Record<string, RelayPeerState> {
+  try {
+    const raw = sessionStorage.getItem(PEER_CACHE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as Record<string, RelayPeerState>;
+    const now = Date.now();
+    const valid: Record<string, RelayPeerState> = {};
+    for (const [id, entry] of Object.entries(parsed)) {
+      if (entry && entry.profile && now - entry.lastSeenAt <= PEER_ACTIVE_TTL_MS) {
+        valid[id] = entry;
+      }
+    }
+    return valid;
+  } catch {
+    return {};
+  }
+}
+
 export default function App() {
   const [currentUser, setCurrentUser] = useState<CurrentUserProfile>(() =>
     loadOrCreateCurrentUser()
@@ -46,7 +68,9 @@ export default function App() {
     loadBlockedUsers()
   );
   const [serverUsers, setServerUsers] = useState<UserProfile[]>([]);
-  const [relayPeers, setRelayPeers] = useState<Record<string, RelayPeerState>>({});
+  const [relayPeers, setRelayPeers] = useState<Record<string, RelayPeerState>>(() =>
+    loadCachedRelayPeers()
+  );
   const [wavedByMe, setWavedByMe] = useState<Record<string, boolean>>({});
   const [wavedAtMe, setWavedAtMe] = useState<Record<string, boolean>>({});
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -73,22 +97,42 @@ export default function App() {
   const lastReplyTimeRef = useRef<Record<string, number>>({});
   const knownMessageIdsRef = useRef<Set<string>>(new Set());
   const watchIdRef = useRef<number | null>(null);
+  const visiblePeerIdsRef = useRef<Set<string>>(new Set());
+  const hasBroadcastedInitialFixRef = useRef<boolean>(false);
   const lastGpsFixRef = useRef<{
     lat: number;
     lng: number;
     accuracy: number;
     timestamp: number;
-  } | null>(null);
+  } | null>(
+    currentUser.lat !== null && currentUser.lng !== null
+      ? {
+          lat: currentUser.lat,
+          lng: currentUser.lng,
+          accuracy: currentUser.accuracy || 35,
+          timestamp: currentUser.gpsUpdatedAt || Date.now(),
+        }
+      : null
+  );
 
-  // Sync current user's live location & profile with server AND global live relay immediately
+  // Persist active relayPeers in sessionStorage so brief refreshes never blank out the radar
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(PEER_CACHE_KEY, JSON.stringify(relayPeers));
+    } catch {
+      // ignore storage quota errors
+    }
+  }, [relayPeers]);
+
+  // Sync current user's live location & profile with server AND global live relay
   const syncWithServer = useCallback(
     async (profileToSync?: CurrentUserProfile, requestPeersReply = false) => {
       const user = profileToSync || currentUserRef.current;
       if (user.lat === null || user.lng === null) return;
 
-      relayRef.current?.broadcastPresence(user, requestPeersReply);
+      relayRef.current?.broadcastPresence(user, requestPeersReply, requestPeersReply);
       if (requestPeersReply) {
-        relayRef.current?.requestAllPeersPresence();
+        relayRef.current?.requestAllPeersPresence(true);
       }
 
       try {
@@ -148,7 +192,7 @@ export default function App() {
     []
   );
 
-  // Initialize LiveProximityRelay with instant handshake reply and chat messages
+  // Initialize LiveProximityRelay with throttled handshake replies and chat messages
   useEffect(() => {
     const relay = new LiveProximityRelay(
       currentUser.id,
@@ -161,15 +205,16 @@ export default function App() {
           setRelayPeers((prev) => {
             const existing = prev[peer.id];
             const isNewPeer = !existing;
+            const now = Date.now();
+
             if (
               (isNewPeer || packet.replyRequested) &&
               me.lat !== null &&
               me.lng !== null
             ) {
-              const now = Date.now();
               if (
                 !lastReplyTimeRef.current[peer.id] ||
-                now - lastReplyTimeRef.current[peer.id] > 800
+                now - lastReplyTimeRef.current[peer.id] > 3000
               ) {
                 lastReplyTimeRef.current[peer.id] = now;
                 relayRef.current?.sendDirectPacket(peer.id, {
@@ -181,10 +226,33 @@ export default function App() {
               }
             }
 
-            // Never let a delayed packet from a slower broker overwrite newer GPS coordinates
-            const incomingGpsTs = peer.gpsUpdatedAt || packet.timestamp || Date.now();
+            // Protect against out-of-order packets AND coarse cell-tower jumps from peer
+            const incomingGpsTs = peer.gpsUpdatedAt || packet.timestamp || now;
             const existingGpsTs = existing?.profile.gpsUpdatedAt || 0;
-            const useIncomingCoords = incomingGpsTs >= existingGpsTs;
+            const incomingAcc =
+              typeof peer.accuracy === 'number' && peer.accuracy > 0
+                ? peer.accuracy
+                : 35;
+            const existingAcc =
+              typeof existing?.profile.accuracy === 'number' &&
+              existing.profile.accuracy > 0
+                ? existing.profile.accuracy
+                : 999;
+
+            const isCoarsePeerDowngrade =
+              existing &&
+              existing.profile.lat !== null &&
+              existing.profile.lng !== null &&
+              now - existingGpsTs < 180000 &&
+              existingAcc <= 70 &&
+              incomingAcc > 85 &&
+              incomingAcc > existingAcc * 1.5;
+
+            const useIncomingCoords =
+              !existing ||
+              existing.profile.lat === null ||
+              existing.profile.lng === null ||
+              (incomingGpsTs >= existingGpsTs - 1500 && !isCoarsePeerDowngrade);
 
             const mergedProfile: CurrentUserProfile = useIncomingCoords
               ? { ...peer, gpsUpdatedAt: incomingGpsTs }
@@ -198,7 +266,7 @@ export default function App() {
 
             return {
               ...prev,
-              [peer.id]: { profile: mergedProfile, lastSeenAt: Date.now() },
+              [peer.id]: { profile: mergedProfile, lastSeenAt: now },
             };
           });
         } else if (packet.type === 'presence_request') {
@@ -211,7 +279,7 @@ export default function App() {
             const now = Date.now();
             if (
               !lastReplyTimeRef.current[packet.fromUserId] ||
-              now - lastReplyTimeRef.current[packet.fromUserId] > 500
+              now - lastReplyTimeRef.current[packet.fromUserId] > 3000
             ) {
               lastReplyTimeRef.current[packet.fromUserId] = now;
               relayRef.current?.sendDirectPacket(packet.fromUserId, {
@@ -220,7 +288,6 @@ export default function App() {
                 replyRequested: false,
                 timestamp: now,
               });
-              relayRef.current?.broadcastPresence(me, false);
             }
           }
         } else if (packet.type === 'chat_message') {
@@ -297,8 +364,7 @@ export default function App() {
           currentUserRef.current.lat !== null &&
           currentUserRef.current.lng !== null
         ) {
-          relayRef.current?.broadcastPresence(currentUserRef.current, true);
-          relayRef.current?.requestAllPeersPresence();
+          relayRef.current?.broadcastPresence(currentUserRef.current, true, true);
         }
       }
     );
@@ -309,7 +375,7 @@ export default function App() {
     };
   }, [currentUser.id]);
 
-  // Prune stale relay peers (> 90s inactive) and clear expired typing states
+  // Prune stale relay peers (> 180s inactive) and clear expired typing states
   useEffect(() => {
     const timer = setInterval(() => {
       const now = Date.now();
@@ -317,7 +383,7 @@ export default function App() {
         let changed = false;
         const next: Record<string, RelayPeerState> = {};
         for (const [id, entry] of Object.entries(prev)) {
-          if (now - entry.lastSeenAt <= 90000) {
+          if (now - entry.lastSeenAt <= PEER_ACTIVE_TTL_MS) {
             next[id] = entry;
           } else {
             changed = true;
@@ -336,26 +402,38 @@ export default function App() {
         });
         return changed ? next : prev;
       });
-    }, 1000);
+    }, 2000);
     return () => clearInterval(timer);
   }, []);
 
-  // Merge server users + WebSocket relay peers and compute exact live distance & compass direction <= 500m
+  // Merge server users + WebSocket relay peers and compute accuracy-compensated distance <= 500m with hysteresis
   const liveUsers = useMemo(() => {
     const blockedSet = new Set(blockedUsers.map((b) => b.id));
     const combined = new Map<string, UserProfile>();
     const myLat = currentUser.lat;
     const myLng = currentUser.lng;
+    const myAcc = currentUser.accuracy;
 
     for (const u of serverUsers) {
       if (blockedSet.has(u.id)) continue;
-      const dist =
+      const wasVisible = visiblePeerIdsRef.current.has(u.id);
+      const maxAllowedDist = wasVisible ? 560 : 500;
+
+      const rawCalculatedDist =
         myLat !== null &&
         myLng !== null &&
         typeof u.lat === 'number' &&
         typeof u.lng === 'number'
-          ? getHaversineDistanceMeters(myLat, myLng, u.lat, u.lng)
+          ? getProximityDistanceMeters(
+              myLat,
+              myLng,
+              u.lat,
+              u.lng,
+              myAcc,
+              u.accuracy
+            )
           : u.distanceMeters;
+
       const compassDir =
         myLat !== null &&
         myLng !== null &&
@@ -364,10 +442,10 @@ export default function App() {
           ? getCompassDirection(myLat, myLng, u.lat, u.lng)
           : u.compassDir;
 
-      if (dist <= 500) {
+      if (rawCalculatedDist <= maxAllowedDist) {
         combined.set(u.id, {
           ...u,
-          distanceMeters: dist,
+          distanceMeters: Math.min(500, rawCalculatedDist),
           compassDir,
           waved: Boolean(u.waved || wavedByMe[u.id]),
           wavedAtMe: Boolean(u.wavedAtMe || wavedAtMe[u.id]),
@@ -380,22 +458,46 @@ export default function App() {
         if (peerId === currentUser.id) continue;
         if (blockedSet.has(peerId)) continue;
         const p = entry.profile;
-        if (!p.isDiscoverableUnder500m || p.lat === null || p.lng === null) continue;
+        if (!p.isDiscoverableUnder500m || p.lat === null || p.lng === null) {
+          combined.delete(peerId);
+          continue;
+        }
 
         const existing = combined.get(peerId);
         const relayGpsTs = p.gpsUpdatedAt || entry.lastSeenAt || 0;
         const serverGpsTs = existing?.gpsUpdatedAt || 0;
+        const relayAcc =
+          typeof p.accuracy === 'number' && p.accuracy > 0 ? p.accuracy : 35;
+        const serverAcc =
+          typeof existing?.accuracy === 'number' && existing.accuracy > 0
+            ? existing.accuracy
+            : 999;
+
+        // Prefer whichever source has sharper accuracy if both are recent, otherwise newer timestamp
+        const bothRecent = Math.abs(relayGpsTs - serverGpsTs) < 60000;
         const useRelayCoords =
           !existing ||
           typeof existing.lat !== 'number' ||
           typeof existing.lng !== 'number' ||
-          relayGpsTs >= serverGpsTs;
+          (bothRecent ? relayAcc <= serverAcc * 1.2 : relayGpsTs >= serverGpsTs);
 
         const peerLat = useRelayCoords ? p.lat : (existing!.lat as number);
         const peerLng = useRelayCoords ? p.lng : (existing!.lng as number);
+        const peerAcc = useRelayCoords ? p.accuracy : existing?.accuracy;
 
-        const dist = getHaversineDistanceMeters(myLat, myLng, peerLat, peerLng);
-        if (dist > 500) {
+        const wasVisible = visiblePeerIdsRef.current.has(peerId);
+        const maxAllowedDist = wasVisible ? 560 : 500;
+
+        const dist = getProximityDistanceMeters(
+          myLat,
+          myLng,
+          peerLat,
+          peerLng,
+          myAcc,
+          peerAcc
+        );
+
+        if (dist > maxAllowedDist) {
           combined.delete(peerId);
           continue;
         }
@@ -417,8 +519,9 @@ export default function App() {
           avatarPreset: p.avatarPreset,
           lat: peerLat,
           lng: peerLng,
+          accuracy: peerAcc,
           gpsUpdatedAt: Math.max(relayGpsTs, serverGpsTs),
-          distanceMeters: dist,
+          distanceMeters: Math.min(500, dist),
           compassDir,
           lastSeenAt: mergedLastSeen,
           waved: Boolean(existing?.waved || wavedByMe[peerId]),
@@ -427,59 +530,88 @@ export default function App() {
       }
     }
 
-    return Array.from(combined.values()).sort(
+    const sorted = Array.from(combined.values()).sort(
       (a, b) => a.distanceMeters - b.distanceMeters
     );
+    visiblePeerIdsRef.current = new Set(sorted.map((u) => u.id));
+    return sorted;
   }, [
     serverUsers,
     relayPeers,
     currentUser.id,
     currentUser.lat,
     currentUser.lng,
+    currentUser.accuracy,
     wavedByMe,
     wavedAtMe,
     blockedUsers,
   ]);
 
-  // Apply new GPS coordinates immediately and trigger instant peer sync
+  // Apply new GPS coordinates with accuracy-lock filtering & smoothing
   const applyCoords = useCallback(
     (latitude: number, longitude: number, accuracy?: number, fixTimestamp?: number) => {
       const now = Date.now();
-      const acc = typeof accuracy === 'number' && accuracy > 0 ? accuracy : 30;
+      const acc = typeof accuracy === 'number' && accuracy > 0 ? accuracy : 35;
       const fixTs = fixTimestamp || now;
       const prevFix = lastGpsFixRef.current;
 
+      let nextLat = latitude;
+      let nextLng = longitude;
+      let nextAcc = acc;
+
       if (prevFix) {
-        if (fixTs < prevFix.timestamp - 500) {
+        if (fixTs < prevFix.timestamp - 1000) {
           return;
         }
+        // Reject coarse cell-tower/Wi-Fi downgrades when we already have a sharper fix within 3 minutes
         if (
-          now - prevFix.timestamp < 30000 &&
-          prevFix.accuracy <= 35 &&
-          acc > 85 &&
-          acc > prevFix.accuracy * 2.5
+          now - prevFix.timestamp < 180000 &&
+          prevFix.accuracy <= 70 &&
+          acc > 80 &&
+          acc > prevFix.accuracy * 1.5
         ) {
           return;
+        }
+
+        // Smooth indoor GPS drift when movement is within sensor uncertainty circle
+        const stepDist = getHaversineDistanceMeters(
+          prevFix.lat,
+          prevFix.lng,
+          latitude,
+          longitude
+        );
+        if (
+          stepDist > 0 &&
+          stepDist <= prevFix.accuracy + acc &&
+          acc >= prevFix.accuracy * 0.8
+        ) {
+          const weightNew = prevFix.accuracy / (prevFix.accuracy + acc);
+          nextLat = prevFix.lat + (latitude - prevFix.lat) * weightNew;
+          nextLng = prevFix.lng + (longitude - prevFix.lng) * weightNew;
+          nextAcc = Math.min(acc, Math.round((prevFix.accuracy + acc) / 2));
         }
       }
 
       lastGpsFixRef.current = {
-        lat: latitude,
-        lng: longitude,
-        accuracy: acc,
+        lat: nextLat,
+        lng: nextLng,
+        accuracy: nextAcc,
         timestamp: fixTs,
       };
+
+      const isInitialFix = !hasBroadcastedInitialFixRef.current;
+      hasBroadcastedInitialFixRef.current = true;
 
       setCurrentUser((prev) => {
         const updated: CurrentUserProfile = {
           ...prev,
-          lat: latitude,
-          lng: longitude,
-          accuracy: Math.round(acc),
+          lat: nextLat,
+          lng: nextLng,
+          accuracy: Math.round(nextAcc),
           gpsUpdatedAt: now,
         };
         saveCurrentUserToStorage(updated);
-        syncWithServer(updated, true);
+        syncWithServer(updated, isInitialFix);
         return updated;
       });
       setGpsState('live');
@@ -523,23 +655,21 @@ export default function App() {
 
     navigator.geolocation.getCurrentPosition(handleSuccess, handleError, {
       enableHighAccuracy: true,
-      timeout: 10000,
+      timeout: 12000,
       maximumAge: 0,
     });
 
-    if (watchIdRef.current !== null) {
-      navigator.geolocation.clearWatch(watchIdRef.current);
+    if (watchIdRef.current === null) {
+      watchIdRef.current = navigator.geolocation.watchPosition(
+        handleSuccess,
+        handleError,
+        {
+          enableHighAccuracy: true,
+          maximumAge: 0,
+          timeout: 15000,
+        }
+      );
     }
-
-    watchIdRef.current = navigator.geolocation.watchPosition(
-      handleSuccess,
-      handleError,
-      {
-        enableHighAccuracy: true,
-        maximumAge: 0,
-        timeout: 15000,
-      }
-    );
   }, [applyCoords, syncWithServer]);
 
   useEffect(() => {
@@ -593,23 +723,11 @@ export default function App() {
 
     const interval = setInterval(() => {
       syncWithServer();
-    }, 2000);
-
-    const handleBeforeUnload = () => {
-      const u = currentUserRef.current;
-      if (u?.id) {
-        navigator.sendBeacon?.(
-          '/api/users/leave',
-          new Blob([JSON.stringify({ id: u.id })], { type: 'application/json' })
-        );
-      }
-    };
-    window.addEventListener('beforeunload', handleBeforeUnload);
+    }, 3000);
 
     return () => {
       evtSource?.close();
       clearInterval(interval);
-      window.removeEventListener('beforeunload', handleBeforeUnload);
     };
   }, [syncWithServer]);
 

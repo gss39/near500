@@ -8,6 +8,7 @@ const DIRECT_TOPIC_PREFIX = `${TOPIC_PREFIX}/direct/`;
 const WS_BROKERS = [
   'wss://broker.emqx.io:8084/mqtt',
   'wss://broker.hivemq.com:8884/mqtt',
+  'wss://test.mosquitto.org:8081/mqtt',
 ];
 
 export type RelayPacket =
@@ -92,6 +93,57 @@ export function getHaversineDistanceMeters(
   const eastMeters = dLng * rN * Math.cos(meanLat);
   const dist = Math.sqrt(northMeters * northMeters + eastMeters * eastMeters);
   return Math.round(dist);
+}
+
+/**
+ * Uncertainty-aware proximity distance in meters.
+ *
+ * Mobile browsers indoors or on mixed Wi-Fi / Mobile Data often report a
+ * horizontal uncertainty radius (`coords.accuracy`) between 30m and 600m+
+ * around a nearby Wi-Fi AP or cell tower. When two phones are placed right
+ * next to each other, their raw center coordinates can differ by up to
+ * `(acc1 + acc2)` meters solely due to sensor/network positioning error.
+ *
+ * By factoring in both devices' horizontal accuracy radii:
+ * - When `rawDist <= combinedUncertainty` (their error circles overlap, i.e.,
+ *   the phones can physically be right next to each other), we return a damped
+ *   inside-circle distance (1m–8m) instead of 300m+ cell-tower drift.
+ * - When `rawDist > combinedUncertainty` (genuine physical separation beyond
+ *   sensor error), we subtract the error margin so walking distances stay
+ *   accurate without artificial 300m inflation.
+ */
+export function getProximityDistanceMeters(
+  lat1: number,
+  lng1: number,
+  lat2: number,
+  lng2: number,
+  acc1?: number,
+  acc2?: number
+): number {
+  const rawDist = getHaversineDistanceMeters(lat1, lng1, lat2, lng2);
+  if (rawDist <= 3) return Math.max(1, rawDist);
+
+  const r1 =
+    typeof acc1 === 'number' && Number.isFinite(acc1) && acc1 > 0
+      ? Math.min(acc1, 650)
+      : 35;
+  const r2 =
+    typeof acc2 === 'number' && Number.isFinite(acc2) && acc2 > 0
+      ? Math.min(acc2, 650)
+      : 35;
+
+  // Include 1.2x indoor multipath/cell-tower margin on reported 95% confidence radii
+  const combinedUncertainty = Math.round((r1 + r2) * 1.2);
+
+  if (rawDist <= combinedUncertainty) {
+    // Error circles overlap: devices are within each other's GPS/network error circle
+    const ratio = rawDist / Math.max(combinedUncertainty, 1);
+    return Math.max(1, Math.min(8, Math.round(ratio * 6)));
+  }
+
+  // Separated beyond uncertainty circle: subtract sensor error radius
+  const corrected = Math.round(rawDist - combinedUncertainty * 0.85);
+  return Math.max(2, corrected);
 }
 
 /**
@@ -222,6 +274,9 @@ export class LiveProximityRelay {
   private onPacket: (packet: RelayPacket) => void;
   private onConnectedCallback?: () => void;
   private destroyed = false;
+  private lastBroadcastTime = 0;
+  private lastBroadcastSig = '';
+  private lastPresenceReqTime = 0;
 
   constructor(
     userId: string,
@@ -268,69 +323,79 @@ export class LiveProximityRelay {
       slot.ws = ws;
 
       ws.onopen = () => {
-        const clientId = `n500_${this.userId.replace(/[^a-zA-Z0-9]/g, '').slice(-8)}_${Math.floor(Math.random() * 90000 + 10000)}`;
+        const clientId = `n500_${this.userId.replace(/[^a-zA-Z0-9]/g, '').slice(-8)}_${Math.floor(Math.random() * 900000 + 100000)}`;
         ws.send(buildConnectPacket(clientId));
       };
 
       ws.onmessage = (event) => {
         if (!(event.data instanceof ArrayBuffer)) return;
         const bytes = new Uint8Array(event.data);
-        if (bytes.length < 2) return;
+        let cursor = 0;
 
-        const packetType = bytes[0] >> 4;
-        if (packetType === 2) {
-          slot.connected = true;
-          ws.send(buildSubscribePacket(1, PRESENCE_TOPIC));
-          ws.send(buildSubscribePacket(2, `${DIRECT_TOPIC_PREFIX}${this.userId}`));
-
-          const reqPacket: RelayPacket = {
-            type: 'presence_request',
-            fromUserId: this.userId,
-            timestamp: Date.now(),
-          };
-          ws.send(buildPublishPacket(PRESENCE_TOPIC, JSON.stringify(reqPacket)));
-
-          this.onConnectedCallback?.();
-
-          if (slot.pingTimer) clearInterval(slot.pingTimer);
-          slot.pingTimer = setInterval(() => {
-            if (slot.ws && slot.ws.readyState === WebSocket.OPEN) {
-              slot.ws.send(new Uint8Array([0xc0, 0x00])); // PINGREQ
-            }
-          }, 20000);
-        } else if (packetType === 3) {
-          let offset = 1;
+        while (cursor + 2 <= bytes.length) {
+          const headerByte = bytes[cursor];
+          const packetType = headerByte >> 4;
+          let offset = cursor + 1;
           let multiplier = 1;
           let remLen = 0;
           let encodedByte = 0;
+          let validLen = true;
+
           do {
-            if (offset >= bytes.length) return;
+            if (offset >= bytes.length) {
+              validLen = false;
+              break;
+            }
             encodedByte = bytes[offset++];
             remLen += (encodedByte & 127) * multiplier;
             multiplier *= 128;
           } while ((encodedByte & 128) !== 0);
 
-          const packetEnd = offset + remLen;
-          if (offset + 2 > bytes.length) return;
-          const topicLen = (bytes[offset] << 8) | bytes[offset + 1];
-          offset += 2 + topicLen;
+          if (!validLen) break;
+          const frameEnd = offset + remLen;
+          if (frameEnd > bytes.length) break;
 
-          const qos = (bytes[0] >> 1) & 0x03;
-          if (qos > 0) offset += 2;
+          if (packetType === 2) {
+            slot.connected = true;
+            ws.send(buildSubscribePacket(1, PRESENCE_TOPIC));
+            ws.send(buildSubscribePacket(2, `${DIRECT_TOPIC_PREFIX}${this.userId}`));
 
-          if (offset <= bytes.length) {
-            const payloadBytes = bytes.subarray(
-              offset,
-              Math.min(packetEnd, bytes.length)
-            );
-            try {
-              const jsonStr = decoder.decode(payloadBytes);
-              const parsed = JSON.parse(jsonStr) as RelayPacket;
-              this.onPacket(parsed);
-            } catch {
-              // ignore malformed JSON
+            const reqPacket: RelayPacket = {
+              type: 'presence_request',
+              fromUserId: this.userId,
+              timestamp: Date.now(),
+            };
+            ws.send(buildPublishPacket(PRESENCE_TOPIC, JSON.stringify(reqPacket)));
+
+            this.onConnectedCallback?.();
+
+            if (slot.pingTimer) clearInterval(slot.pingTimer);
+            slot.pingTimer = setInterval(() => {
+              if (slot.ws && slot.ws.readyState === WebSocket.OPEN) {
+                slot.ws.send(new Uint8Array([0xc0, 0x00])); // PINGREQ
+              }
+            }, 22000);
+          } else if (packetType === 3) {
+            if (offset + 2 <= frameEnd) {
+              const topicLen = (bytes[offset] << 8) | bytes[offset + 1];
+              let payloadOffset = offset + 2 + topicLen;
+              const qos = (headerByte >> 1) & 0x03;
+              if (qos > 0) payloadOffset += 2;
+
+              if (payloadOffset <= frameEnd) {
+                const payloadBytes = bytes.subarray(payloadOffset, frameEnd);
+                try {
+                  const jsonStr = decoder.decode(payloadBytes);
+                  const parsed = JSON.parse(jsonStr) as RelayPacket;
+                  this.onPacket(parsed);
+                } catch {
+                  // ignore malformed JSON
+                }
+              }
             }
           }
+
+          cursor = frameEnd;
         }
       };
 
@@ -341,7 +406,10 @@ export class LiveProximityRelay {
           slot.pingTimer = null;
         }
         if (!this.destroyed) {
-          slot.reconnectTimer = setTimeout(() => this.connectBroker(slot), 2000);
+          slot.reconnectTimer = setTimeout(
+            () => this.connectBroker(slot),
+            2500 + Math.floor(Math.random() * 1200)
+          );
         }
       };
     } catch {
@@ -349,22 +417,41 @@ export class LiveProximityRelay {
     }
   }
 
-  public broadcastPresence(profile: CurrentUserProfile, replyRequested = false) {
+  public broadcastPresence(
+    profile: CurrentUserProfile,
+    replyRequested = false,
+    force = false
+  ) {
     if (profile.lat === null || profile.lng === null) return;
+    const now = Date.now();
+    const sig = `${profile.name}|${profile.role}|${profile.bio}|${profile.locationSpot}|${profile.statusTag || ''}|${profile.avatarPreset}|${(profile.photoUrl || '').length}|${profile.isDiscoverableUnder500m}|${profile.lat.toFixed(5)}|${profile.lng.toFixed(5)}|${profile.accuracy || 0}`;
+    const changed = sig !== this.lastBroadcastSig;
+
+    if (!force && !changed && !replyRequested && now - this.lastBroadcastTime < 2200) {
+      return;
+    }
+    this.lastBroadcastTime = now;
+    this.lastBroadcastSig = sig;
+
     const packet: RelayPacket = {
       type: 'presence',
       profile,
       replyRequested,
-      timestamp: Date.now(),
+      timestamp: now,
     };
     this.publish(PRESENCE_TOPIC, packet);
   }
 
-  public requestAllPeersPresence() {
+  public requestAllPeersPresence(force = false) {
+    const now = Date.now();
+    if (!force && now - this.lastPresenceReqTime < 9000) {
+      return;
+    }
+    this.lastPresenceReqTime = now;
     const packet: RelayPacket = {
       type: 'presence_request',
       fromUserId: this.userId,
-      timestamp: Date.now(),
+      timestamp: now,
     };
     this.publish(PRESENCE_TOPIC, packet);
   }

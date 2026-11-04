@@ -23,6 +23,7 @@ export interface UserProfile {
   photoUrl?: string;
   lat?: number;
   lng?: number;
+  accuracy?: number;
   lastSeenAt?: number;
   gpsUpdatedAt?: number;
   waved?: boolean;
@@ -117,7 +118,23 @@ export function loadOrCreateCurrentUser(): CurrentUserProfile {
     if (saved) {
       const parsed = JSON.parse(saved);
       if (parsed && parsed.id && parsed.name) {
-        return parsed;
+        const now = Date.now();
+        const gpsAge =
+          typeof parsed.gpsUpdatedAt === 'number'
+            ? now - parsed.gpsUpdatedAt
+            : Infinity;
+        const isRecentAndSharp =
+          gpsAge < 90_000 &&
+          typeof parsed.accuracy === 'number' &&
+          parsed.accuracy <= 75;
+
+        return {
+          ...parsed,
+          lat: isRecentAndSharp ? parsed.lat : null,
+          lng: isRecentAndSharp ? parsed.lng : null,
+          accuracy: isRecentAndSharp ? parsed.accuracy : undefined,
+          gpsUpdatedAt: isRecentAndSharp ? parsed.gpsUpdatedAt : undefined,
+        };
       }
     }
   } catch {

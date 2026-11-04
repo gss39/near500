@@ -50,7 +50,7 @@ export interface LiveChatMessage {
 }
 
 const DATA_FILE = path.join(__dirname, '.live-users-store.json');
-const ACTIVE_TTL_MS = 90 * 1000; // 90 seconds active presence window
+const ACTIVE_TTL_MS = 180 * 1000; // 180 seconds active presence window
 
 interface StoreData {
   users: Record<string, LiveUserRecord>;
@@ -88,7 +88,9 @@ function getDistanceMeters(
   lat1: number,
   lng1: number,
   lat2: number,
-  lng2: number
+  lng2: number,
+  acc1?: number,
+  acc2?: number
 ): number {
   const toRad = (deg: number) => (deg * Math.PI) / 180;
   const dLat = toRad(lat2 - lat1);
@@ -105,7 +107,28 @@ function getDistanceMeters(
 
   const northMeters = dLat * rM;
   const eastMeters = dLng * rN * Math.cos(meanLat);
-  return Math.round(Math.sqrt(northMeters * northMeters + eastMeters * eastMeters));
+  const rawDist = Math.round(
+    Math.sqrt(northMeters * northMeters + eastMeters * eastMeters)
+  );
+  if (rawDist <= 3) return Math.max(1, rawDist);
+
+  const r1 =
+    typeof acc1 === 'number' && Number.isFinite(acc1) && acc1 > 0
+      ? Math.min(acc1, 650)
+      : 35;
+  const r2 =
+    typeof acc2 === 'number' && Number.isFinite(acc2) && acc2 > 0
+      ? Math.min(acc2, 650)
+      : 35;
+
+  const combinedUncertainty = Math.round((r1 + r2) * 1.2);
+  if (rawDist <= combinedUncertainty) {
+    const ratio = rawDist / Math.max(combinedUncertainty, 1);
+    return Math.max(1, Math.min(8, Math.round(ratio * 6)));
+  }
+
+  const corrected = Math.round(rawDist - combinedUncertainty * 0.85);
+  return Math.max(2, corrected);
 }
 
 function getCompassDir(
@@ -206,17 +229,26 @@ async function startServer() {
 
     const existing = store.users[id];
     const incomingGpsTs = typeof gpsUpdatedAt === 'number' ? gpsUpdatedAt : Date.now();
-    // Never overwrite a newer GPS reading with an out-of-order older packet
+    const incomingAcc =
+      typeof accuracy === 'number' && accuracy > 0 ? Math.round(accuracy) : 35;
+
+    // Never overwrite a newer or much sharper GPS reading with a coarse cell-tower jump
+    const isCoarseDowngrade =
+      existing &&
+      typeof existing.accuracy === 'number' &&
+      existing.accuracy <= 65 &&
+      Date.now() - existing.gpsUpdatedAt < 180000 &&
+      incomingAcc > 85 &&
+      incomingAcc > existing.accuracy * 1.6;
+
     const useIncomingCoords =
-      !existing || !existing.gpsUpdatedAt || incomingGpsTs >= existing.gpsUpdatedAt;
+      !existing ||
+      !existing.gpsUpdatedAt ||
+      (incomingGpsTs >= existing.gpsUpdatedAt - 1000 && !isCoarseDowngrade);
 
     const finalLat = useIncomingCoords ? Number(lat) : existing.lat;
     const finalLng = useIncomingCoords ? Number(lng) : existing.lng;
-    const finalAcc = useIncomingCoords
-      ? typeof accuracy === 'number'
-        ? Math.round(accuracy)
-        : undefined
-      : existing.accuracy;
+    const finalAcc = useIncomingCoords ? incomingAcc : existing.accuracy;
     const finalGpsTs = useIncomingCoords ? incomingGpsTs : existing.gpsUpdatedAt;
 
     const updatedUser: LiveUserRecord = {
@@ -259,7 +291,14 @@ async function startServer() {
     const nearbyUsersUnder500m = Object.values(store.users)
       .filter((u) => u.id !== id && u.isDiscoverableUnder500m)
       .map((u) => {
-        const distanceMeters = getDistanceMeters(finalLat, finalLng, u.lat, u.lng);
+        const distanceMeters = getDistanceMeters(
+          finalLat,
+          finalLng,
+          u.lat,
+          u.lng,
+          finalAcc,
+          u.accuracy
+        );
         const compassDir = getCompassDir(finalLat, finalLng, u.lat, u.lng);
         return {
           id: u.id,
@@ -272,6 +311,7 @@ async function startServer() {
           avatarPreset: u.avatarPreset,
           lat: u.lat,
           lng: u.lng,
+          accuracy: u.accuracy,
           gpsUpdatedAt: u.gpsUpdatedAt,
           distanceMeters,
           compassDir,
@@ -280,7 +320,7 @@ async function startServer() {
           wavedAtMe: updatedUser.wavedBy.includes(u.id),
         };
       })
-      .filter((u) => u.distanceMeters <= 500)
+      .filter((u) => u.distanceMeters <= 550)
       .sort((a, b) => a.distanceMeters - b.distanceMeters);
 
     const userMessages = store.messages.filter(
