@@ -1,4 +1,4 @@
-import { CurrentUserProfile, ChatMessage } from '../data/nearbyUsers';
+import { CurrentUserProfile, ChatMessage, LocalWallPost } from '../data/nearbyUsers';
 
 const TOPIC_PREFIX = 'near500_live_v4';
 const PRESENCE_TOPIC = `${TOPIC_PREFIX}/presence`;
@@ -59,6 +59,14 @@ export type RelayPacket =
       fromUserId: string;
       toUserId: string;
       isTyping: boolean;
+      timestamp: number;
+    }
+  | {
+      type: 'wall_post';
+      post: LocalWallPost;
+      lat: number | null;
+      lng: number | null;
+      accuracy?: number;
       timestamp: number;
     };
 
@@ -458,6 +466,22 @@ export class LiveProximityRelay {
 
   public sendDirectPacket(targetUserId: string, packet: RelayPacket) {
     this.publish(`${DIRECT_TOPIC_PREFIX}${targetUserId}`, packet);
+  }
+
+  public broadcastWallPost(
+    post: LocalWallPost,
+    lat: number | null,
+    lng: number | null,
+    accuracy?: number
+  ) {
+    this.publish(PRESENCE_TOPIC, {
+      type: 'wall_post',
+      post,
+      lat,
+      lng,
+      accuracy,
+      timestamp: Date.now(),
+    });
   }
 
   private publish(topic: string, packet: RelayPacket) {

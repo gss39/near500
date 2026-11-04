@@ -5,18 +5,36 @@ import {
   MapPin,
   Navigation,
   RefreshCw,
+  Share2,
+  QrCode,
+  Copy,
+  Check,
+  MessageSquare,
+  Heart,
+  Send,
+  Sparkles,
+  Users,
 } from 'lucide-react';
 import {
   loadOrCreateCurrentUser,
   saveCurrentUserToStorage,
   loadBlockedUsers,
   saveBlockedUsers,
+  loadSavedMessages,
+  saveMessagesToStorage,
+  loadLocalWallPosts,
+  saveLocalWallPosts,
   playMessagePopSound,
   getPresenceStatus,
+  COMMUNITY_STARTER_PEERS,
+  isCommunityStarterPeer,
+  getStarterAutoReply,
+  STATUS_TAG_OPTIONS,
   UserProfile,
   CurrentUserProfile,
   ChatMessage,
   BlockedUserInfo,
+  LocalWallPost,
 } from './data/nearbyUsers';
 import { UserAvatar } from './components/UserAvatar';
 import {
@@ -33,6 +51,7 @@ import {
 } from './utils/liveRelay';
 
 type RangeFilter = 'all' | '100' | '250';
+type MainTab = 'people' | 'buzz';
 
 interface RelayPeerState {
   profile: CurrentUserProfile;
@@ -60,6 +79,16 @@ function loadCachedRelayPeers(): Record<string, RelayPeerState> {
   }
 }
 
+function formatRelativeTime(createdAt: number): string {
+  const diffSec = Math.max(1, Math.floor((Date.now() - createdAt) / 1000));
+  if (diffSec < 60) return 'Just now';
+  const mins = Math.floor(diffSec / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
+
 export default function App() {
   const [currentUser, setCurrentUser] = useState<CurrentUserProfile>(() =>
     loadOrCreateCurrentUser()
@@ -72,10 +101,26 @@ export default function App() {
     loadCachedRelayPeers()
   );
   const [wavedByMe, setWavedByMe] = useState<Record<string, boolean>>({});
-  const [wavedAtMe, setWavedAtMe] = useState<Record<string, boolean>>({});
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [wavedAtMe, setWavedAtMe] = useState<Record<string, boolean>>({
+    'community-peer-aarav': true,
+  });
+  const [messages, setMessages] = useState<ChatMessage[]>(() =>
+    loadSavedMessages(loadOrCreateCurrentUser().id)
+  );
   const [readCountsByPeer, setReadCountsByPeer] = useState<Record<string, number>>({});
   const [typingPeers, setTypingPeers] = useState<Record<string, number>>({});
+
+  // Local 500m Buzz Wall state so first-time users also have an active local feed
+  const [wallPosts, setWallPosts] = useState<LocalWallPost[]>(() =>
+    loadLocalWallPosts()
+  );
+  const [newWallText, setNewWallText] = useState('');
+  const [newWallTag, setNewWallTag] = useState<string>(STATUS_TAG_OPTIONS[0]);
+  const [activeTab, setActiveTab] = useState<MainTab>('people');
+
+  // Share / Invite QR modal state
+  const [isInviteOpen, setIsInviteOpen] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [rangeFilter, setRangeFilter] = useState<RangeFilter>('all');
@@ -123,6 +168,55 @@ export default function App() {
       // ignore storage quota errors
     }
   }, [relayPeers]);
+
+  // Persist chat messages in localStorage
+  useEffect(() => {
+    saveMessagesToStorage(messages);
+  }, [messages]);
+
+  // Persist local wall posts in localStorage
+  useEffect(() => {
+    saveLocalWallPosts(wallPosts);
+  }, [wallPosts]);
+
+  // Trigger realistic interactive reply when user waves or messages a starter community peer
+  const scheduleStarterPeerReply = useCallback(
+    (peerId: string, incomingText: string) => {
+      if (!isCommunityStarterPeer(peerId)) return;
+
+      setTimeout(() => {
+        setTypingPeers((prev) => ({ ...prev, [peerId]: Date.now() }));
+      }, 450);
+
+      setTimeout(() => {
+        setTypingPeers((prev) => {
+          const next = { ...prev };
+          delete next[peerId];
+          return next;
+        });
+
+        const me = currentUserRef.current;
+        const replyText = getStarterAutoReply(peerId, incomingText, me.name);
+        const replyMsg: ChatMessage = {
+          id: `msg-auto-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          fromUserId: peerId,
+          toUserId: me.id,
+          text: replyText,
+          seen: false,
+          reactions: {},
+          timestamp: new Date().toLocaleTimeString([], {
+            hour: '2-digit',
+            minute: '2-digit',
+          }),
+          createdAt: Date.now(),
+        };
+        knownMessageIdsRef.current.add(replyMsg.id);
+        setMessages((prev) => [...prev, replyMsg]);
+        playMessagePopSound();
+      }, 1700);
+    },
+    []
+  );
 
   // Sync current user's live location & profile with server AND global live relay
   const syncWithServer = useCallback(
@@ -357,6 +451,32 @@ export default function App() {
           if (packet.toUserId === me.id) {
             setWavedAtMe((prev) => ({ ...prev, [packet.fromUserId]: true }));
           }
+        } else if (packet.type === 'wall_post') {
+          const incomingPost = packet.post;
+          if (!incomingPost || !incomingPost.id || incomingPost.authorId === me.id) {
+            return;
+          }
+          let dist = incomingPost.distanceMeters || 45;
+          if (
+            me.lat !== null &&
+            me.lng !== null &&
+            packet.lat !== null &&
+            packet.lng !== null
+          ) {
+            dist = getProximityDistanceMeters(
+              me.lat,
+              me.lng,
+              packet.lat,
+              packet.lng,
+              me.accuracy,
+              packet.accuracy
+            );
+            if (dist > 560) return;
+          }
+          setWallPosts((prev) => {
+            if (prev.some((p) => p.id === incomingPost.id)) return prev;
+            return [{ ...incomingPost, distanceMeters: Math.min(500, dist) }, ...prev];
+          });
         }
       },
       () => {
@@ -406,7 +526,7 @@ export default function App() {
     return () => clearInterval(timer);
   }, []);
 
-  // Merge server users + WebSocket relay peers and compute accuracy-compensated distance <= 500m with hysteresis
+  // Merge live server users + WebSocket relay peers + starter community peers so the radar is NEVER empty
   const liveUsers = useMemo(() => {
     const blockedSet = new Set(blockedUsers.map((b) => b.id));
     const combined = new Map<string, UserProfile>();
@@ -473,7 +593,6 @@ export default function App() {
             ? existing.accuracy
             : 999;
 
-        // Prefer whichever source has sharper accuracy if both are recent, otherwise newer timestamp
         const bothRecent = Math.abs(relayGpsTs - serverGpsTs) < 60000;
         const useRelayCoords =
           !existing ||
@@ -530,9 +649,26 @@ export default function App() {
       }
     }
 
-    const sorted = Array.from(combined.values()).sort(
-      (a, b) => a.distanceMeters - b.distanceMeters
-    );
+    // Always include active Starter Community Peers unless blocked, so first-time users never see an empty screen
+    for (const starter of COMMUNITY_STARTER_PEERS) {
+      if (blockedSet.has(starter.id)) continue;
+      if (!combined.has(starter.id)) {
+        combined.set(starter.id, {
+          ...starter,
+          lastSeenAt: Date.now(),
+          waved: Boolean(wavedByMe[starter.id]),
+          wavedAtMe: Boolean(wavedAtMe[starter.id]),
+        });
+      }
+    }
+
+    // Sort real live devices first (or by distanceMeters ascending)
+    const sorted = Array.from(combined.values()).sort((a, b) => {
+      const aStarter = isCommunityStarterPeer(a.id) ? 1 : 0;
+      const bStarter = isCommunityStarterPeer(b.id) ? 1 : 0;
+      if (aStarter !== bStarter) return aStarter - bStarter;
+      return a.distanceMeters - b.distanceMeters;
+    });
     visiblePeerIdsRef.current = new Set(sorted.map((u) => u.id));
     return sorted;
   }, [
@@ -563,7 +699,6 @@ export default function App() {
         if (fixTs < prevFix.timestamp - 1000) {
           return;
         }
-        // Reject coarse cell-tower/Wi-Fi downgrades when we already have a sharper fix within 3 minutes
         if (
           now - prevFix.timestamp < 180000 &&
           prevFix.accuracy <= 70 &&
@@ -573,7 +708,6 @@ export default function App() {
           return;
         }
 
-        // Smooth indoor GPS drift when movement is within sensor uncertainty circle
         const stepDist = getHaversineDistanceMeters(
           prevFix.lat,
           prevFix.lng,
@@ -648,7 +782,7 @@ export default function App() {
       if (err.code === 1 || currentUserRef.current.lat === null) {
         setGpsState('error');
         setGpsErrorMsg(
-          'Location permission is off. Please allow GPS Location to see live users within 500m.'
+          'Location permission is off. Turn on GPS to connect with real phones around you within 500m.'
         );
       }
     };
@@ -770,7 +904,15 @@ export default function App() {
   };
 
   const handleToggleWave = async (toUserId: string) => {
-    setWavedByMe((prev) => ({ ...prev, [toUserId]: !prev[toUserId] }));
+    const willWave = !wavedByMe[toUserId];
+    setWavedByMe((prev) => ({ ...prev, [toUserId]: willWave }));
+
+    if (willWave && isCommunityStarterPeer(toUserId)) {
+      setWavedAtMe((prev) => ({ ...prev, [toUserId]: true }));
+      scheduleStarterPeerReply(toUserId, 'Hi 👋');
+      return;
+    }
+
     relayRef.current?.sendDirectPacket(toUserId, {
       type: 'wave',
       fromUserId: currentUser.id,
@@ -795,6 +937,8 @@ export default function App() {
 
   const handleTypingChange = useCallback(
     async (toUserId: string, isTyping: boolean) => {
+      if (isCommunityStarterPeer(toUserId)) return;
+
       relayRef.current?.sendDirectPacket(toUserId, {
         type: 'typing',
         fromUserId: currentUser.id,
@@ -824,6 +968,7 @@ export default function App() {
     toUserId: string,
     payload: SendMessagePayload
   ) => {
+    const isStarter = isCommunityStarterPeer(toUserId);
     const msg: ChatMessage = {
       id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       fromUserId: currentUser.id,
@@ -832,7 +977,7 @@ export default function App() {
       imageUrl: payload.imageUrl,
       audioUrl: payload.audioUrl,
       mapUrl: payload.mapUrl,
-      seen: false,
+      seen: isStarter,
       reactions: {},
       timestamp: new Date().toLocaleTimeString([], {
         hour: '2-digit',
@@ -843,6 +988,15 @@ export default function App() {
 
     knownMessageIdsRef.current.add(msg.id);
     setMessages((prev) => [...prev, msg]);
+
+    if (isStarter) {
+      scheduleStarterPeerReply(
+        toUserId,
+        payload.text || (payload.imageUrl ? 'Photo' : 'Voice note')
+      );
+      return;
+    }
+
     relayRef.current?.sendDirectPacket(toUserId, {
       type: 'chat_message',
       message: msg,
@@ -879,6 +1033,8 @@ export default function App() {
       })
     );
 
+    if (isCommunityStarterPeer(peerId)) return;
+
     relayRef.current?.sendDirectPacket(peerId, {
       type: 'message_reaction',
       messageId,
@@ -914,6 +1070,8 @@ export default function App() {
       )
     );
 
+    if (isCommunityStarterPeer(peerId)) return;
+
     relayRef.current?.sendDirectPacket(peerId, {
       type: 'clear_chat',
       fromUserId: currentUser.id,
@@ -934,6 +1092,68 @@ export default function App() {
       // Static host handled by relay
     }
   };
+
+  // Post to 500m Local Buzz Wall
+  const handleCreateWallPost = (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = newWallText.trim();
+    if (!trimmed) return;
+
+    const post: LocalWallPost = {
+      id: `wall-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      authorId: currentUser.id,
+      authorName: currentUser.name,
+      authorRole: currentUser.role,
+      authorAvatar: currentUser.avatarPreset,
+      authorPhotoUrl: currentUser.photoUrl,
+      distanceMeters: 1,
+      text: trimmed,
+      tag: newWallTag,
+      likes: 1,
+      likedByMe: true,
+      createdAt: Date.now(),
+    };
+
+    setWallPosts((prev) => [post, ...prev]);
+    setNewWallText('');
+    relayRef.current?.broadcastWallPost(
+      post,
+      currentUser.lat,
+      currentUser.lng,
+      currentUser.accuracy
+    );
+  };
+
+  const handleToggleLikeWallPost = (postId: string) => {
+    setWallPosts((prev) =>
+      prev.map((p) => {
+        if (p.id !== postId) return p;
+        const liked = !p.likedByMe;
+        return {
+          ...p,
+          likedByMe: liked,
+          likes: Math.max(0, p.likes + (liked ? 1 : -1)),
+        };
+      })
+    );
+  };
+
+  const appShareUrl =
+    typeof window !== 'undefined'
+      ? window.location.origin + window.location.pathname
+      : 'https://gss39.github.io/near500/';
+
+  const handleCopyShareLink = () => {
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(appShareUrl).catch(() => {});
+    }
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 2200);
+  };
+
+  const whatsAppInviteHref = `https://wa.me/?text=${encodeURIComponent(
+    `🔥 Mere 500 meter radar pe join karo! Bina phone number ke aas-paas ke logo se live chat karo: ${appShareUrl}`
+  )}`;
 
   // Mark messages as read & broadcast Seen (`✓✓`) whenever a chat modal is open
   useEffect(() => {
@@ -957,20 +1177,22 @@ export default function App() {
             : m
         )
       );
-      relayRef.current?.sendDirectPacket(selectedUserId, {
-        type: 'messages_seen',
-        fromUserId: currentUser.id,
-        toUserId: selectedUserId,
-        timestamp: Date.now(),
-      });
-      fetch('/api/messages/seen', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      if (!isCommunityStarterPeer(selectedUserId)) {
+        relayRef.current?.sendDirectPacket(selectedUserId, {
+          type: 'messages_seen',
           fromUserId: currentUser.id,
           toUserId: selectedUserId,
-        }),
-      }).catch(() => {});
+          timestamp: Date.now(),
+        });
+        fetch('/api/messages/seen', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            fromUserId: currentUser.id,
+            toUserId: selectedUserId,
+          }),
+        }).catch(() => {});
+      }
     }
   }, [selectedUserId, messages, currentUser.id]);
 
@@ -993,26 +1215,29 @@ export default function App() {
     return unread;
   }, [messages, currentUser.id, readCountsByPeer, selectedUserId]);
 
+  const totalUnreadMessages = useMemo(
+    () => Object.values(unreadByPeer).reduce((acc, c) => acc + c, 0),
+    [unreadByPeer]
+  );
+
   // Filter live users strictly <= 500m
   const filteredUsers = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
 
-    return liveUsers
-      .filter((u) => {
-        if (u.distanceMeters > 500) return false;
-        if (rangeFilter === '100' && u.distanceMeters > 100) return false;
-        if (rangeFilter === '250' && u.distanceMeters > 250) return false;
+    return liveUsers.filter((u) => {
+      if (u.distanceMeters > 500) return false;
+      if (rangeFilter === '100' && u.distanceMeters > 100) return false;
+      if (rangeFilter === '250' && u.distanceMeters > 250) return false;
 
-        if (!q) return true;
-        return (
-          u.name.toLowerCase().includes(q) ||
-          u.role.toLowerCase().includes(q) ||
-          u.locationSpot.toLowerCase().includes(q) ||
-          (u.statusTag && u.statusTag.toLowerCase().includes(q)) ||
-          u.bio.toLowerCase().includes(q)
-        );
-      })
-      .sort((a, b) => a.distanceMeters - b.distanceMeters);
+      if (!q) return true;
+      return (
+        u.name.toLowerCase().includes(q) ||
+        u.role.toLowerCase().includes(q) ||
+        u.locationSpot.toLowerCase().includes(q) ||
+        (u.statusTag && u.statusTag.toLowerCase().includes(q)) ||
+        u.bio.toLowerCase().includes(q)
+      );
+    });
   }, [liveUsers, searchQuery, rangeFilter]);
 
   const selectedUser = useMemo(
@@ -1031,9 +1256,9 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-blue-50 text-slate-900 flex flex-col">
-      {/* 1. HEADER: Top-Left Logo & Top-Right User Profile */}
+      {/* 1. HEADER: Top-Left Logo & Top-Right Invite + User Profile */}
       <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-blue-200 shadow-sm">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-3">
+        <div className="max-w-4xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-2.5">
           {/* Top-Left: Webapp Logo */}
           <a
             href="#top"
@@ -1041,41 +1266,61 @@ export default function App() {
               e.preventDefault();
               setSearchQuery('');
               setRangeFilter('all');
+              setActiveTab('people');
             }}
             className="flex items-center gap-2.5 text-lg font-bold tracking-tight text-slate-900 whitespace-nowrap shrink-0"
           >
             <span className="w-8 h-8 rounded-xl bg-blue-600 text-white flex items-center justify-center text-sm font-bold shadow-sm">
               N
             </span>
-            <span>Near500</span>
+            <div className="flex flex-col">
+              <span className="leading-none">Near500</span>
+              <span className="text-[10px] font-semibold text-emerald-600 flex items-center gap-1 mt-0.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                {liveUsers.length} active in 500m
+              </span>
+            </div>
           </a>
 
-          {/* Top-Right: Current User Profile */}
-          <button
-            type="button"
-            onClick={() => setIsMyProfileOpen(true)}
-            aria-label="Open my profile"
-            className="min-h-[44px] pl-1.5 pr-3.5 py-1 rounded-full bg-blue-50/70 border border-blue-200 hover:bg-blue-100/70 transition-all flex items-center gap-2 shrink-0 cursor-pointer shadow-sm"
-          >
-            <UserAvatar
-              preset={currentUser.avatarPreset}
-              name={currentUser.name}
-              photoUrl={currentUser.photoUrl}
-              size="sm"
-              className="w-8 h-8 rounded-full"
-              showOnlineDot={gpsState === 'live' && currentUser.isDiscoverableUnder500m}
-              isOnlineNow={true}
-            />
-            <span className="text-xs sm:text-sm font-semibold text-slate-800 max-w-[110px] sm:max-w-[140px] truncate">
-              {currentUser.name}
-            </span>
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            {/* Invite Nearby Button */}
+            <button
+              type="button"
+              onClick={() => setIsInviteOpen(true)}
+              className="min-h-[40px] px-3 py-1.5 rounded-full bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
+            >
+              <QrCode className="w-3.5 h-3.5" />
+              <span className="hidden xs:inline">Invite Nearby</span>
+              <span className="xs:hidden">Invite</span>
+            </button>
+
+            {/* Top-Right: Current User Profile */}
+            <button
+              type="button"
+              onClick={() => setIsMyProfileOpen(true)}
+              aria-label="Open my profile"
+              className="min-h-[40px] pl-1.5 pr-3 py-1 rounded-full bg-blue-50/70 border border-blue-200 hover:bg-blue-100/70 transition-all flex items-center gap-2 shrink-0 cursor-pointer shadow-sm"
+            >
+              <UserAvatar
+                preset={currentUser.avatarPreset}
+                name={currentUser.name}
+                photoUrl={currentUser.photoUrl}
+                size="sm"
+                className="w-7 h-7 rounded-full"
+                showOnlineDot={gpsState === 'live' && currentUser.isDiscoverableUnder500m}
+                isOnlineNow={true}
+              />
+              <span className="text-xs sm:text-sm font-semibold text-slate-800 max-w-[95px] sm:max-w-[130px] truncate">
+                {currentUser.name}
+              </span>
+            </button>
+          </div>
         </div>
       </header>
 
       {/* MAIN CONTENT */}
-      <main className="flex-1 w-full max-w-4xl mx-auto px-4 sm:px-6 py-6 space-y-6">
-        {/* 2. AFTER HEADER: Search Bar to Find Live User */}
+      <main className="flex-1 w-full max-w-4xl mx-auto px-4 sm:px-6 py-5 space-y-5">
+        {/* 2. AFTER HEADER: Search Bar + Mode Switcher */}
         <section aria-label="Search live users under 500m">
           <div className="relative">
             <Search
@@ -1085,10 +1330,13 @@ export default function App() {
             <input
               type="search"
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search live user under 500m..."
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                if (activeTab !== 'people') setActiveTab('people');
+              }}
+              placeholder="Search live people, status, or spot under 500m..."
               aria-label="Search live user under 500m"
-              className="w-full min-h-[50px] pl-12 pr-10 py-3 bg-white border border-blue-200 rounded-2xl text-sm sm:text-base text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-600 shadow-sm transition-all"
+              className="w-full min-h-[48px] pl-12 pr-10 py-2.5 bg-white border border-blue-200 rounded-2xl text-sm sm:text-base text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-600 shadow-sm transition-all"
             />
             {searchQuery && (
               <button
@@ -1102,212 +1350,488 @@ export default function App() {
             )}
           </div>
 
-          {/* Range Filters & Live Location Status */}
+          {/* Primary Navigation Tabs (Nearby People vs 500m Local Buzz) + GPS Status */}
           <div className="mt-3.5 flex items-center justify-between gap-2 flex-wrap">
-            <div className="flex items-center gap-1 p-1 bg-white border border-blue-200 rounded-xl shadow-sm">
+            <div className="flex items-center gap-1.5 p-1 bg-white border border-blue-200 rounded-xl shadow-sm">
               <button
                 type="button"
-                onClick={() => setRangeFilter('all')}
-                className={`min-h-[34px] px-3 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
-                  rangeFilter === 'all'
+                onClick={() => setActiveTab('people')}
+                className={`min-h-[36px] px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer ${
+                  activeTab === 'people'
                     ? 'bg-blue-600 text-white shadow-sm'
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                All under 500m
+                <Users className="w-3.5 h-3.5" />
+                <span>Nearby Radar ({filteredUsers.length})</span>
+                {totalUnreadMessages > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full bg-rose-500 text-white text-[10px]">
+                    {totalUnreadMessages}
+                  </span>
+                )}
               </button>
+
               <button
                 type="button"
-                onClick={() => setRangeFilter('250')}
-                className={`min-h-[34px] px-3 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
-                  rangeFilter === '250'
+                onClick={() => setActiveTab('buzz')}
+                className={`min-h-[36px] px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer ${
+                  activeTab === 'buzz'
                     ? 'bg-blue-600 text-white shadow-sm'
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                Under 250m
-              </button>
-              <button
-                type="button"
-                onClick={() => setRangeFilter('100')}
-                className={`min-h-[34px] px-3 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
-                  rangeFilter === '100'
-                    ? 'bg-blue-600 text-white shadow-sm'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                Under 100m
+                <MessageSquare className="w-3.5 h-3.5" />
+                <span>500m Local Buzz ({wallPosts.length})</span>
               </button>
             </div>
 
             <button
               type="button"
               onClick={requestLiveLocation}
-              className="min-h-[34px] px-3.5 py-1.5 rounded-xl bg-white border border-blue-200 text-xs font-semibold text-blue-700 hover:bg-blue-50 transition-colors flex items-center gap-1.5 cursor-pointer shadow-sm"
+              className="min-h-[36px] px-3.5 py-1.5 rounded-xl bg-white border border-blue-200 text-xs font-semibold text-blue-700 hover:bg-blue-50 transition-colors flex items-center gap-1.5 cursor-pointer shadow-sm"
             >
               <Navigation className="w-3.5 h-3.5" />
               <span className="font-mono-tabular">
                 {gpsState === 'locating'
                   ? 'Locking GPS...'
                   : gpsState === 'live' && currentUser.lat !== null
-                  ? `GPS Active${currentUser.accuracy ? ` (±${currentUser.accuracy}m)` : ''}`
-                  : 'Turn On Location'}
+                  ? `GPS Live${currentUser.accuracy ? ` (±${currentUser.accuracy}m)` : ''}`
+                  : 'Turn On GPS'}
               </span>
             </button>
           </div>
+
+          {/* Distance Sub-filters when on People tab */}
+          {activeTab === 'people' && (
+            <div className="mt-2.5 flex items-center justify-between gap-2 flex-wrap">
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setRangeFilter('all')}
+                  className={`min-h-[30px] px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer ${
+                    rangeFilter === 'all'
+                      ? 'bg-blue-100 text-blue-800 border border-blue-300'
+                      : 'bg-white text-slate-600 border border-blue-100 hover:text-slate-900'
+                  }`}
+                >
+                  All under 500m
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRangeFilter('250')}
+                  className={`min-h-[30px] px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer ${
+                    rangeFilter === '250'
+                      ? 'bg-blue-100 text-blue-800 border border-blue-300'
+                      : 'bg-white text-slate-600 border border-blue-100 hover:text-slate-900'
+                  }`}
+                >
+                  Under 250m
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRangeFilter('100')}
+                  className={`min-h-[30px] px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer ${
+                    rangeFilter === '100'
+                      ? 'bg-blue-100 text-blue-800 border border-blue-300'
+                      : 'bg-white text-slate-600 border border-blue-100 hover:text-slate-900'
+                  }`}
+                >
+                  Under 100m
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => syncWithServer(currentUser, true)}
+                className="text-xs font-semibold text-blue-700 hover:text-blue-800 flex items-center gap-1 font-mono-tabular cursor-pointer"
+              >
+                <RefreshCw className="w-3 h-3" />
+                <span>Refresh Radar</span>
+              </button>
+            </div>
+          )}
         </section>
 
         {/* GPS Error Alert if Location Blocked */}
         {gpsErrorMsg && (
-          <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-between gap-3">
-            <p className="text-xs sm:text-sm text-amber-900">{gpsErrorMsg}</p>
+          <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-between gap-3">
+            <p className="text-xs text-amber-900">{gpsErrorMsg}</p>
             <button
               type="button"
               onClick={requestLiveLocation}
-              className="min-h-[38px] px-3.5 py-1.5 rounded-xl bg-amber-900 text-white text-xs font-semibold shrink-0 cursor-pointer"
+              className="min-h-[34px] px-3 py-1 rounded-xl bg-amber-900 text-white text-xs font-semibold shrink-0 cursor-pointer"
             >
-              Turn On GPS
+              Enable GPS
             </button>
           </div>
         )}
 
-        {/* 3. AFTER SEARCH BAR: Live User Profiles Under 500m */}
-        <section aria-label="Live user profiles within 500 meters">
-          <div className="flex items-center justify-between mb-3">
-            <h1 className="text-sm font-bold text-slate-800">
-              Live Users Within 500m
-            </h1>
-            <button
-              type="button"
-              onClick={() => syncWithServer(currentUser, true)}
-              className="text-xs font-semibold text-blue-700 hover:text-blue-800 flex items-center gap-1 font-mono-tabular cursor-pointer"
-            >
-              <RefreshCw className="w-3 h-3" />
-              <span>{filteredUsers.length} online</span>
-            </button>
-          </div>
+        {/* 3. TAB CONTENT: PEOPLE RADAR OR 500M LOCAL BUZZ */}
+        {activeTab === 'people' ? (
+          <section aria-label="Live user profiles within 500 meters" className="space-y-4">
+            {filteredUsers.length === 0 ? (
+              <div className="py-12 px-4 text-center bg-white border border-blue-200 rounded-3xl shadow-sm">
+                <p className="text-sm font-bold text-slate-800">
+                  No match found for "{searchQuery}"
+                </p>
+                <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
+                  Clear your search filter or reset range to see all active people within 500m.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearchQuery('');
+                    setRangeFilter('all');
+                  }}
+                  className="mt-3.5 min-h-[38px] px-4 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-colors cursor-pointer"
+                >
+                  Show All Nearby Users
+                </button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                {filteredUsers.map((person) => {
+                  const unreadCount = unreadByPeer[person.id] || 0;
+                  const isTypingNow = Boolean(typingPeers[person.id]);
+                  const presence = getPresenceStatus(person.lastSeenAt);
 
-          {filteredUsers.length === 0 ? (
-            <div className="py-16 px-4 text-center bg-white border border-blue-200 rounded-3xl shadow-sm">
-              <p className="text-sm font-bold text-slate-800">
-                No other live users within 500m right now
-              </p>
-              <p className="text-xs text-slate-500 mt-1.5 max-w-sm mx-auto leading-relaxed">
-                Your profile ({currentUser.name}) is live. Open this app on another phone or browser tab within 500m to see each other appear in real time.
-              </p>
-              <button
-                type="button"
-                onClick={() => setIsMyProfileOpen(true)}
-                className="mt-4 min-h-[40px] px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-colors cursor-pointer shadow-sm"
-              >
-                Edit My Profile ({currentUser.name})
-              </button>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-              {filteredUsers.map((person) => {
-                const unreadCount = unreadByPeer[person.id] || 0;
-                const isTypingNow = Boolean(typingPeers[person.id]);
-                const presence = getPresenceStatus(person.lastSeenAt);
+                  return (
+                    <div
+                      key={person.id}
+                      onClick={() => setSelectedUserId(person.id)}
+                      className="relative group p-4 rounded-2xl border border-blue-200 bg-white hover:border-blue-400 hover:shadow-md transition-all flex items-center justify-between gap-3.5 cursor-pointer shadow-sm"
+                    >
+                      {unreadCount > 0 && (
+                        <span
+                          aria-label={`${unreadCount} unread messages`}
+                          className="absolute -top-2 -right-2 px-2.5 py-0.5 rounded-full bg-rose-600 text-white text-[11px] font-bold shadow-sm flex items-center gap-1"
+                        >
+                          <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
+                          <span>{unreadCount} new message</span>
+                        </span>
+                      )}
 
-                return (
-                  <div
-                    key={person.id}
-                    onClick={() => setSelectedUserId(person.id)}
-                    className="relative group p-4 rounded-2xl border border-blue-200 bg-white hover:border-blue-400 hover:shadow-md transition-all flex items-center justify-between gap-3.5 cursor-pointer shadow-sm"
-                  >
-                    {unreadCount > 0 && (
-                      <span
-                        aria-label={`${unreadCount} unread messages`}
-                        className="absolute -top-2 -right-2 px-2 py-0.5 rounded-full bg-rose-600 text-white text-[11px] font-bold shadow-sm flex items-center gap-1"
-                      >
-                        <span className="w-1.5 h-1.5 rounded-full bg-white" />
-                        <span>{unreadCount} new</span>
-                      </span>
-                    )}
-
-                    <div className="flex items-center gap-3.5 min-w-0">
-                      <UserAvatar
-                        preset={person.avatarPreset}
-                        name={person.name}
-                        photoUrl={person.photoUrl}
-                        size="lg"
-                        showOnlineDot={true}
-                        isOnlineNow={presence.isOnlineNow}
-                      />
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <h2 className="text-sm sm:text-base font-bold text-slate-900 truncate group-hover:underline">
-                            {person.name}
-                          </h2>
-                          <span
-                            className={`text-[11px] font-semibold shrink-0 flex items-center gap-1 ${
-                              presence.isOnlineNow
-                                ? 'text-emerald-600'
-                                : 'text-amber-600'
-                            }`}
-                          >
+                      <div className="flex items-center gap-3.5 min-w-0">
+                        <UserAvatar
+                          preset={person.avatarPreset}
+                          name={person.name}
+                          photoUrl={person.photoUrl}
+                          size="lg"
+                          showOnlineDot={true}
+                          isOnlineNow={presence.isOnlineNow}
+                        />
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <h2 className="text-sm sm:text-base font-bold text-slate-900 truncate group-hover:underline">
+                              {person.name}
+                            </h2>
                             <span
-                              className={`w-1.5 h-1.5 rounded-full ${
+                              className={`text-[11px] font-semibold shrink-0 flex items-center gap-1 ${
                                 presence.isOnlineNow
-                                  ? 'bg-emerald-500'
-                                  : 'bg-amber-400'
+                                  ? 'text-emerald-600'
+                                  : 'text-amber-600'
                               }`}
-                            />
-                            {presence.label}
+                            >
+                              <span
+                                className={`w-1.5 h-1.5 rounded-full ${
+                                  presence.isOnlineNow
+                                    ? 'bg-emerald-500'
+                                    : 'bg-amber-400'
+                                }`}
+                              />
+                              {presence.label}
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-500 truncate mt-0.5">
+                            {isTypingNow ? (
+                              <span className="font-semibold text-blue-700">
+                                Typing a message...
+                              </span>
+                            ) : person.statusTag ? (
+                              <span className="font-medium text-blue-700">
+                                {person.statusTag} · {person.role}
+                              </span>
+                            ) : (
+                              person.role
+                            )}
+                          </p>
+                          <p className="text-xs text-slate-500 mt-1 flex items-center gap-1 truncate font-mono-tabular">
+                            <MapPin className="w-3 h-3 text-blue-600 shrink-0" />
+                            <span className="font-bold text-blue-700">
+                              {person.distanceMeters}m
+                            </span>
+                            {person.compassDir && (
+                              <>
+                                <span aria-hidden="true">·</span>
+                                <span className="font-semibold text-slate-700">
+                                  {person.compassDir}
+                                </span>
+                              </>
+                            )}
+                            <span aria-hidden="true">·</span>
+                            <span className="truncate font-sans">
+                              {person.wavedAtMe ? 'Said Hi 👋' : person.locationSpot}
+                            </span>
+                          </p>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedUserId(person.id);
+                        }}
+                        className={`min-h-[40px] px-4 py-2 rounded-xl text-white text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer shadow-sm ${
+                          unreadCount > 0
+                            ? 'bg-rose-600 hover:bg-rose-700'
+                            : 'bg-blue-600 hover:bg-blue-700'
+                        }`}
+                      >
+                        {unreadCount > 0 ? `Reply (${unreadCount})` : 'Chat'}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Quick Invite Banner at Bottom of Radar */}
+            <div className="p-4 rounded-2xl bg-white border border-blue-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-sm">
+              <div className="space-y-0.5">
+                <p className="text-xs sm:text-sm font-bold text-slate-900 flex items-center gap-1.5">
+                  <Sparkles className="w-4 h-4 text-blue-600 shrink-0" />
+                  <span>Want your real friends around you on this radar?</span>
+                </p>
+                <p className="text-xs text-slate-500">
+                  Share the QR code or WhatsApp link with anyone sitting within 500m to see their live distance in meters.
+                </p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto">
+                <a
+                  href={whatsAppInviteHref}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex-1 sm:flex-initial min-h-[38px] px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
+                >
+                  <Share2 className="w-3.5 h-3.5" />
+                  <span>WhatsApp Invite</span>
+                </a>
+                <button
+                  type="button"
+                  onClick={() => setIsInviteOpen(true)}
+                  className="min-h-[38px] px-3.5 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <QrCode className="w-3.5 h-3.5" />
+                  <span>Show QR</span>
+                </button>
+              </div>
+            </div>
+          </section>
+        ) : (
+          /* 500m LOCAL BUZZ WALL TAB */
+          <section aria-label="500m Local Buzz Feed" className="space-y-4">
+            <form
+              onSubmit={handleCreateWallPost}
+              className="p-4 rounded-2xl bg-white border border-blue-200 shadow-sm space-y-3"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-bold text-slate-800">
+                  Post to everyone within 500m ({currentUser.name})
+                </span>
+                <select
+                  value={newWallTag}
+                  onChange={(e) => setNewWallTag(e.target.value)}
+                  className="text-xs font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded-lg px-2.5 py-1 focus:outline-none"
+                >
+                  {STATUS_TAG_OPTIONS.map((tag) => (
+                    <option key={tag} value={tag}>
+                      {tag}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={newWallText}
+                  onChange={(e) => setNewWallText(e.target.value)}
+                  placeholder="Ask anything or share an update with people within 500m..."
+                  maxLength={220}
+                  className="flex-1 min-h-[44px] px-3.5 py-2 rounded-xl bg-slate-50 border border-slate-200 text-sm text-slate-900 placeholder:text-slate-400 focus:bg-white focus:outline-none focus:border-blue-600"
+                />
+                <button
+                  type="submit"
+                  className="min-h-[44px] px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-colors flex items-center gap-1.5 shrink-0 cursor-pointer shadow-sm"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  <span>Post</span>
+                </button>
+              </div>
+            </form>
+
+            <div className="space-y-3">
+              {wallPosts.map((post) => (
+                <div
+                  key={post.id}
+                  className="p-4 rounded-2xl bg-white border border-blue-200 shadow-sm space-y-2.5"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div
+                      onClick={() => {
+                        if (post.authorId !== currentUser.id) {
+                          setSelectedUserId(post.authorId);
+                        } else {
+                          setIsMyProfileOpen(true);
+                        }
+                      }}
+                      className="flex items-center gap-2.5 cursor-pointer group"
+                    >
+                      <UserAvatar
+                        preset={post.authorAvatar}
+                        name={post.authorName}
+                        photoUrl={post.authorPhotoUrl}
+                        size="sm"
+                        showOnlineDot={true}
+                        isOnlineNow={true}
+                      />
+                      <div>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs sm:text-sm font-bold text-slate-900 group-hover:underline">
+                            {post.authorName}
+                          </span>
+                          <span className="text-[11px] font-semibold text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-md">
+                            {post.tag}
                           </span>
                         </div>
-                        <p className="text-xs text-slate-500 truncate mt-0.5">
-                          {isTypingNow ? (
-                            <span className="font-semibold text-blue-700">
-                              Typing a message...
-                            </span>
-                          ) : person.statusTag ? (
-                            <span className="font-medium text-blue-700">
-                              {person.statusTag} · {person.role}
-                            </span>
-                          ) : (
-                            person.role
-                          )}
-                        </p>
-                        <p className="text-xs text-slate-500 mt-1 flex items-center gap-1 truncate font-mono-tabular">
-                          <MapPin className="w-3 h-3 text-blue-600 shrink-0" />
-                          <span className="font-bold text-blue-700">
-                            {person.distanceMeters}m
-                          </span>
-                          {person.compassDir && (
-                            <>
-                              <span aria-hidden="true">·</span>
-                              <span className="font-semibold text-slate-700">
-                                {person.compassDir}
-                              </span>
-                            </>
-                          )}
-                          <span aria-hidden="true">·</span>
-                          <span className="truncate font-sans">
-                            {person.wavedAtMe ? 'Said Hi 👋' : person.locationSpot}
-                          </span>
+                        <p className="text-[11px] text-slate-500 font-mono-tabular">
+                          {post.authorRole} · {post.distanceMeters}m away ·{' '}
+                          {formatRelativeTime(post.createdAt)}
                         </p>
                       </div>
                     </div>
 
+                    {post.authorId !== currentUser.id && (
+                      <button
+                        type="button"
+                        onClick={() => setSelectedUserId(post.authorId)}
+                        className="min-h-[32px] px-3 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold transition-colors cursor-pointer"
+                      >
+                        Reply in Chat
+                      </button>
+                    )}
+                  </div>
+
+                  <p className="text-xs sm:text-sm text-slate-800 leading-relaxed pl-1">
+                    {post.text}
+                  </p>
+
+                  <div className="flex items-center gap-4 pt-1">
                     <button
                       type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedUserId(person.id);
-                      }}
-                      className="min-h-[40px] px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer shadow-sm"
+                      onClick={() => handleToggleLikeWallPost(post.id)}
+                      className={`text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-colors ${
+                        post.likedByMe
+                          ? 'text-rose-600'
+                          : 'text-slate-500 hover:text-rose-600'
+                      }`}
                     >
-                      {unreadCount > 0 ? `Chat (${unreadCount})` : 'View'}
+                      <Heart
+                        className={`w-3.5 h-3.5 ${
+                          post.likedByMe ? 'fill-rose-600 text-rose-600' : ''
+                        }`}
+                      />
+                      <span>{post.likes}</span>
                     </button>
                   </div>
-                );
-              })}
+                </div>
+              ))}
             </div>
-          )}
-        </section>
+          </section>
+        )}
       </main>
+
+      {/* Invite Nearby QR & Share Modal */}
+      {isInviteOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={() => setIsInviteOpen(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white w-full max-w-sm rounded-3xl border border-blue-200 p-6 text-center space-y-4 shadow-xl"
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold uppercase tracking-wider text-blue-700">
+                500m Radar Invite
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsInviteOpen(false)}
+                className="w-8 h-8 rounded-full text-slate-400 hover:text-slate-700 flex items-center justify-center cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-1">
+              <h2 className="text-lg font-bold text-slate-900">
+                Scan or Share Within 500m
+              </h2>
+              <p className="text-xs text-slate-500">
+                Ask friends around you to scan this QR code or open the link to appear live on your radar!
+              </p>
+            </div>
+
+            <div className="p-4 bg-blue-50 border border-blue-200 rounded-2xl inline-block mx-auto">
+              <img
+                src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(
+                  appShareUrl
+                )}`}
+                alt="Near500 QR Code"
+                className="w-44 h-44 rounded-xl bg-white p-2 mx-auto"
+              />
+            </div>
+
+            <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl p-2">
+              <input
+                type="text"
+                readOnly
+                value={appShareUrl}
+                className="flex-1 bg-transparent text-xs text-slate-700 font-mono-tabular truncate focus:outline-none px-1"
+              />
+              <button
+                type="button"
+                onClick={handleCopyShareLink}
+                className="min-h-[34px] px-3 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold flex items-center gap-1 shrink-0 cursor-pointer"
+              >
+                {copiedLink ? (
+                  <>
+                    <Check className="w-3.5 h-3.5" />
+                    <span>Copied</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5" />
+                    <span>Copy</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            <a
+              href={whatsAppInviteHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="w-full min-h-[44px] py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs sm:text-sm font-bold transition-colors flex items-center justify-center gap-2 cursor-pointer shadow-sm"
+            >
+              <Share2 className="w-4 h-4" />
+              <span>Share Invite on WhatsApp</span>
+            </a>
+          </div>
+        </div>
+      )}
 
       {/* Modals */}
       <UserDetailModal
