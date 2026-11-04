@@ -9,9 +9,6 @@ import {
   QrCode,
   Copy,
   Check,
-  MessageSquare,
-  Heart,
-  Send,
   Sparkles,
   Users,
 } from 'lucide-react';
@@ -22,19 +19,15 @@ import {
   saveBlockedUsers,
   loadSavedMessages,
   saveMessagesToStorage,
-  loadLocalWallPosts,
-  saveLocalWallPosts,
   playMessagePopSound,
   getPresenceStatus,
   COMMUNITY_STARTER_PEERS,
   isCommunityStarterPeer,
   getStarterAutoReply,
-  STATUS_TAG_OPTIONS,
   UserProfile,
   CurrentUserProfile,
   ChatMessage,
   BlockedUserInfo,
-  LocalWallPost,
 } from './data/nearbyUsers';
 import { UserAvatar } from './components/UserAvatar';
 import {
@@ -51,7 +44,6 @@ import {
 } from './utils/liveRelay';
 
 type RangeFilter = 'all' | '100' | '250';
-type MainTab = 'people' | 'buzz';
 
 interface RelayPeerState {
   profile: CurrentUserProfile;
@@ -79,16 +71,6 @@ function loadCachedRelayPeers(): Record<string, RelayPeerState> {
   }
 }
 
-function formatRelativeTime(createdAt: number): string {
-  const diffSec = Math.max(1, Math.floor((Date.now() - createdAt) / 1000));
-  if (diffSec < 60) return 'Just now';
-  const mins = Math.floor(diffSec / 60);
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.floor(hrs / 24)}d ago`;
-}
-
 export default function App() {
   const [currentUser, setCurrentUser] = useState<CurrentUserProfile>(() =>
     loadOrCreateCurrentUser()
@@ -109,14 +91,6 @@ export default function App() {
   );
   const [readCountsByPeer, setReadCountsByPeer] = useState<Record<string, number>>({});
   const [typingPeers, setTypingPeers] = useState<Record<string, number>>({});
-
-  // Local 500m Buzz Wall state so first-time users also have an active local feed
-  const [wallPosts, setWallPosts] = useState<LocalWallPost[]>(() =>
-    loadLocalWallPosts()
-  );
-  const [newWallText, setNewWallText] = useState('');
-  const [newWallTag, setNewWallTag] = useState<string>(STATUS_TAG_OPTIONS[0]);
-  const [activeTab, setActiveTab] = useState<MainTab>('people');
 
   // Share / Invite QR modal state
   const [isInviteOpen, setIsInviteOpen] = useState(false);
@@ -173,11 +147,6 @@ export default function App() {
   useEffect(() => {
     saveMessagesToStorage(messages);
   }, [messages]);
-
-  // Persist local wall posts in localStorage
-  useEffect(() => {
-    saveLocalWallPosts(wallPosts);
-  }, [wallPosts]);
 
   // Trigger realistic interactive reply when user waves or messages a starter community peer
   const scheduleStarterPeerReply = useCallback(
@@ -451,32 +420,6 @@ export default function App() {
           if (packet.toUserId === me.id) {
             setWavedAtMe((prev) => ({ ...prev, [packet.fromUserId]: true }));
           }
-        } else if (packet.type === 'wall_post') {
-          const incomingPost = packet.post;
-          if (!incomingPost || !incomingPost.id || incomingPost.authorId === me.id) {
-            return;
-          }
-          let dist = incomingPost.distanceMeters || 45;
-          if (
-            me.lat !== null &&
-            me.lng !== null &&
-            packet.lat !== null &&
-            packet.lng !== null
-          ) {
-            dist = getProximityDistanceMeters(
-              me.lat,
-              me.lng,
-              packet.lat,
-              packet.lng,
-              me.accuracy,
-              packet.accuracy
-            );
-            if (dist > 560) return;
-          }
-          setWallPosts((prev) => {
-            if (prev.some((p) => p.id === incomingPost.id)) return prev;
-            return [{ ...incomingPost, distanceMeters: Math.min(500, dist) }, ...prev];
-          });
         }
       },
       () => {
@@ -1093,51 +1036,6 @@ export default function App() {
     }
   };
 
-  // Post to 500m Local Buzz Wall
-  const handleCreateWallPost = (e: React.FormEvent) => {
-    e.preventDefault();
-    const trimmed = newWallText.trim();
-    if (!trimmed) return;
-
-    const post: LocalWallPost = {
-      id: `wall-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      authorId: currentUser.id,
-      authorName: currentUser.name,
-      authorRole: currentUser.role,
-      authorAvatar: currentUser.avatarPreset,
-      authorPhotoUrl: currentUser.photoUrl,
-      distanceMeters: 1,
-      text: trimmed,
-      tag: newWallTag,
-      likes: 1,
-      likedByMe: true,
-      createdAt: Date.now(),
-    };
-
-    setWallPosts((prev) => [post, ...prev]);
-    setNewWallText('');
-    relayRef.current?.broadcastWallPost(
-      post,
-      currentUser.lat,
-      currentUser.lng,
-      currentUser.accuracy
-    );
-  };
-
-  const handleToggleLikeWallPost = (postId: string) => {
-    setWallPosts((prev) =>
-      prev.map((p) => {
-        if (p.id !== postId) return p;
-        const liked = !p.likedByMe;
-        return {
-          ...p,
-          likedByMe: liked,
-          likes: Math.max(0, p.likes + (liked ? 1 : -1)),
-        };
-      })
-    );
-  };
-
   const appShareUrl =
     typeof window !== 'undefined'
       ? window.location.origin + window.location.pathname
@@ -1255,10 +1153,10 @@ export default function App() {
   }, [messages, currentUser.id, selectedUserId]);
 
   return (
-    <div className="min-h-screen bg-blue-50 text-slate-900 flex flex-col">
-      {/* 1. HEADER: Top-Left Logo & Top-Right Invite + User Profile */}
+    <div className="min-h-[100dvh] bg-blue-50 text-slate-900 flex flex-col">
+      {/* 1. HEADER: Mobile-Responsive Top-Left Logo & Top-Right Invite + User Profile */}
       <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-blue-200 shadow-sm">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-2.5">
+        <div className="max-w-4xl mx-auto px-3 sm:px-6 h-14 sm:h-16 flex items-center justify-between gap-2">
           {/* Top-Left: Webapp Logo */}
           <a
             href="#top"
@@ -1266,32 +1164,31 @@ export default function App() {
               e.preventDefault();
               setSearchQuery('');
               setRangeFilter('all');
-              setActiveTab('people');
             }}
-            className="flex items-center gap-2.5 text-lg font-bold tracking-tight text-slate-900 whitespace-nowrap shrink-0"
+            className="flex items-center gap-2 text-base sm:text-lg font-bold tracking-tight text-slate-900 whitespace-nowrap shrink-0"
           >
-            <span className="w-8 h-8 rounded-xl bg-blue-600 text-white flex items-center justify-center text-sm font-bold shadow-sm">
+            <span className="w-8 h-8 rounded-xl bg-blue-600 text-white flex items-center justify-center text-sm font-bold shadow-sm shrink-0">
               N
             </span>
             <div className="flex flex-col">
               <span className="leading-none">Near500</span>
               <span className="text-[10px] font-semibold text-emerald-600 flex items-center gap-1 mt-0.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                {liveUsers.length} active in 500m
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+                <span>{liveUsers.length} active in 500m</span>
               </span>
             </div>
           </a>
 
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
             {/* Invite Nearby Button */}
             <button
               type="button"
               onClick={() => setIsInviteOpen(true)}
-              className="min-h-[40px] px-3 py-1.5 rounded-full bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
+              className="min-h-[38px] sm:min-h-[40px] px-2.5 sm:px-3.5 py-1.5 rounded-full bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer shadow-sm"
             >
-              <QrCode className="w-3.5 h-3.5" />
-              <span className="hidden xs:inline">Invite Nearby</span>
-              <span className="xs:hidden">Invite</span>
+              <QrCode className="w-3.5 h-3.5 shrink-0" />
+              <span className="hidden sm:inline">Invite Nearby</span>
+              <span className="sm:hidden">Invite</span>
             </button>
 
             {/* Top-Right: Current User Profile */}
@@ -1299,18 +1196,18 @@ export default function App() {
               type="button"
               onClick={() => setIsMyProfileOpen(true)}
               aria-label="Open my profile"
-              className="min-h-[40px] pl-1.5 pr-3 py-1 rounded-full bg-blue-50/70 border border-blue-200 hover:bg-blue-100/70 transition-all flex items-center gap-2 shrink-0 cursor-pointer shadow-sm"
+              className="min-h-[38px] sm:min-h-[40px] pl-1.5 pr-2.5 sm:pr-3 py-1 rounded-full bg-blue-50/70 border border-blue-200 hover:bg-blue-100/70 transition-all flex items-center gap-1.5 sm:gap-2 min-w-0 cursor-pointer shadow-sm"
             >
               <UserAvatar
                 preset={currentUser.avatarPreset}
                 name={currentUser.name}
                 photoUrl={currentUser.photoUrl}
                 size="sm"
-                className="w-7 h-7 rounded-full"
+                className="w-7 h-7 rounded-full shrink-0"
                 showOnlineDot={gpsState === 'live' && currentUser.isDiscoverableUnder500m}
                 isOnlineNow={true}
               />
-              <span className="text-xs sm:text-sm font-semibold text-slate-800 max-w-[95px] sm:max-w-[130px] truncate">
+              <span className="text-xs sm:text-sm font-semibold text-slate-800 max-w-[78px] xs:max-w-[100px] sm:max-w-[140px] truncate">
                 {currentUser.name}
               </span>
             </button>
@@ -1319,448 +1216,302 @@ export default function App() {
       </header>
 
       {/* MAIN CONTENT */}
-      <main className="flex-1 w-full max-w-4xl mx-auto px-4 sm:px-6 py-5 space-y-5">
-        {/* 2. AFTER HEADER: Search Bar + Mode Switcher */}
-        <section aria-label="Search live users under 500m">
+      <main className="flex-1 w-full max-w-4xl mx-auto px-3 sm:px-6 py-3.5 sm:py-5 space-y-4">
+        {/* 2. AFTER HEADER: Search Bar + Radar Controls */}
+        <section aria-label="Search live users under 500m" className="space-y-3">
           <div className="relative">
             <Search
-              className="w-5 h-5 text-blue-600 absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none"
+              className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600 absolute left-3.5 sm:left-4 top-1/2 -translate-y-1/2 pointer-events-none"
               aria-hidden="true"
             />
             <input
               type="search"
               value={searchQuery}
-              onChange={(e) => {
-                setSearchQuery(e.target.value);
-                if (activeTab !== 'people') setActiveTab('people');
-              }}
+              onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search live people, status, or spot under 500m..."
               aria-label="Search live user under 500m"
-              className="w-full min-h-[48px] pl-12 pr-10 py-2.5 bg-white border border-blue-200 rounded-2xl text-sm sm:text-base text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-600 shadow-sm transition-all"
+              className="w-full min-h-[46px] sm:min-h-[48px] pl-10 sm:pl-12 pr-10 py-2 bg-white border border-blue-200 rounded-2xl text-base sm:text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-600 shadow-sm transition-all"
             />
             {searchQuery && (
               <button
                 type="button"
                 onClick={() => setSearchQuery('')}
                 aria-label="Clear search"
-                className="min-w-[44px] min-h-[44px] absolute right-1 top-1/2 -translate-y-1/2 flex items-center justify-center text-slate-400 hover:text-slate-700 cursor-pointer"
+                className="min-w-[42px] min-h-[42px] absolute right-1 top-1/2 -translate-y-1/2 flex items-center justify-center text-slate-400 hover:text-slate-700 cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             )}
           </div>
 
-          {/* Primary Navigation Tabs (Nearby People vs 500m Local Buzz) + GPS Status */}
-          <div className="mt-3.5 flex items-center justify-between gap-2 flex-wrap">
-            <div className="flex items-center gap-1.5 p-1 bg-white border border-blue-200 rounded-xl shadow-sm">
-              <button
-                type="button"
-                onClick={() => setActiveTab('people')}
-                className={`min-h-[36px] px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer ${
-                  activeTab === 'people'
-                    ? 'bg-blue-600 text-white shadow-sm'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <Users className="w-3.5 h-3.5" />
+          {/* Radar Header Bar: Nearby Count + GPS Status + Refresh */}
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="min-h-[36px] px-3 py-1.5 rounded-xl bg-blue-600 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm shrink-0">
+                <Users className="w-3.5 h-3.5 shrink-0" />
                 <span>Nearby Radar ({filteredUsers.length})</span>
                 {totalUnreadMessages > 0 && (
-                  <span className="px-1.5 py-0.2 rounded-full bg-rose-500 text-white text-[10px]">
+                  <span className="px-1.5 py-0.5 rounded-full bg-rose-500 text-white text-[10px] leading-none">
                     {totalUnreadMessages}
                   </span>
                 )}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setActiveTab('buzz')}
-                className={`min-h-[36px] px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer ${
-                  activeTab === 'buzz'
-                    ? 'bg-blue-600 text-white shadow-sm'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <MessageSquare className="w-3.5 h-3.5" />
-                <span>500m Local Buzz ({wallPosts.length})</span>
-              </button>
+              </div>
             </div>
 
-            <button
-              type="button"
-              onClick={requestLiveLocation}
-              className="min-h-[36px] px-3.5 py-1.5 rounded-xl bg-white border border-blue-200 text-xs font-semibold text-blue-700 hover:bg-blue-50 transition-colors flex items-center gap-1.5 cursor-pointer shadow-sm"
-            >
-              <Navigation className="w-3.5 h-3.5" />
-              <span className="font-mono-tabular">
-                {gpsState === 'locating'
-                  ? 'Locking GPS...'
-                  : gpsState === 'live' && currentUser.lat !== null
-                  ? `GPS Live${currentUser.accuracy ? ` (±${currentUser.accuracy}m)` : ''}`
-                  : 'Turn On GPS'}
-              </span>
-            </button>
-          </div>
-
-          {/* Distance Sub-filters when on People tab */}
-          {activeTab === 'people' && (
-            <div className="mt-2.5 flex items-center justify-between gap-2 flex-wrap">
-              <div className="flex items-center gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => setRangeFilter('all')}
-                  className={`min-h-[30px] px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer ${
-                    rangeFilter === 'all'
-                      ? 'bg-blue-100 text-blue-800 border border-blue-300'
-                      : 'bg-white text-slate-600 border border-blue-100 hover:text-slate-900'
-                  }`}
-                >
-                  All under 500m
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setRangeFilter('250')}
-                  className={`min-h-[30px] px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer ${
-                    rangeFilter === '250'
-                      ? 'bg-blue-100 text-blue-800 border border-blue-300'
-                      : 'bg-white text-slate-600 border border-blue-100 hover:text-slate-900'
-                  }`}
-                >
-                  Under 250m
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setRangeFilter('100')}
-                  className={`min-h-[30px] px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer ${
-                    rangeFilter === '100'
-                      ? 'bg-blue-100 text-blue-800 border border-blue-300'
-                      : 'bg-white text-slate-600 border border-blue-100 hover:text-slate-900'
-                  }`}
-                >
-                  Under 100m
-                </button>
-              </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                type="button"
+                onClick={requestLiveLocation}
+                className="min-h-[36px] px-2.5 sm:px-3.5 py-1.5 rounded-xl bg-white border border-blue-200 text-[11px] sm:text-xs font-semibold text-blue-700 hover:bg-blue-50 transition-colors flex items-center gap-1.5 cursor-pointer shadow-sm"
+              >
+                <Navigation className="w-3.5 h-3.5 shrink-0" />
+                <span className="font-mono-tabular">
+                  {gpsState === 'locating'
+                    ? 'Locking GPS...'
+                    : gpsState === 'live' && currentUser.lat !== null
+                    ? `GPS Live${currentUser.accuracy ? ` (±${currentUser.accuracy}m)` : ''}`
+                    : 'Turn On GPS'}
+                </span>
+              </button>
 
               <button
                 type="button"
                 onClick={() => syncWithServer(currentUser, true)}
-                className="text-xs font-semibold text-blue-700 hover:text-blue-800 flex items-center gap-1 font-mono-tabular cursor-pointer"
+                aria-label="Refresh radar"
+                title="Refresh radar"
+                className="min-h-[36px] px-2.5 sm:px-3 py-1.5 rounded-xl bg-white border border-blue-200 text-xs font-semibold text-blue-700 hover:bg-blue-50 transition-colors flex items-center gap-1.5 cursor-pointer shadow-sm"
               >
-                <RefreshCw className="w-3 h-3" />
-                <span>Refresh Radar</span>
+                <RefreshCw className="w-3.5 h-3.5 shrink-0" />
+                <span className="hidden sm:inline">Refresh</span>
               </button>
             </div>
-          )}
+          </div>
+
+          {/* Distance Range Filters (Scrollable on narrow mobile screens) */}
+          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-0.5">
+            <button
+              type="button"
+              onClick={() => setRangeFilter('all')}
+              className={`min-h-[34px] px-3 py-1 rounded-xl text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                rangeFilter === 'all'
+                  ? 'bg-blue-100 text-blue-800 border border-blue-300 shadow-2xs'
+                  : 'bg-white text-slate-600 border border-blue-100 hover:text-slate-900'
+              }`}
+            >
+              All under 500m
+            </button>
+            <button
+              type="button"
+              onClick={() => setRangeFilter('250')}
+              className={`min-h-[34px] px-3 py-1 rounded-xl text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                rangeFilter === '250'
+                  ? 'bg-blue-100 text-blue-800 border border-blue-300 shadow-2xs'
+                  : 'bg-white text-slate-600 border border-blue-100 hover:text-slate-900'
+              }`}
+            >
+              Under 250m
+            </button>
+            <button
+              type="button"
+              onClick={() => setRangeFilter('100')}
+              className={`min-h-[34px] px-3 py-1 rounded-xl text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                rangeFilter === '100'
+                  ? 'bg-blue-100 text-blue-800 border border-blue-300 shadow-2xs'
+                  : 'bg-white text-slate-600 border border-blue-100 hover:text-slate-900'
+              }`}
+            >
+              Under 100m
+            </button>
+          </div>
         </section>
 
         {/* GPS Error Alert if Location Blocked */}
         {gpsErrorMsg && (
-          <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-between gap-3">
-            <p className="text-xs text-amber-900">{gpsErrorMsg}</p>
+          <div className="p-3 sm:p-3.5 rounded-2xl bg-amber-50 border border-amber-200 flex flex-col xs:flex-row items-start xs:items-center justify-between gap-2.5">
+            <p className="text-xs text-amber-900 leading-relaxed">{gpsErrorMsg}</p>
             <button
               type="button"
               onClick={requestLiveLocation}
-              className="min-h-[34px] px-3 py-1 rounded-xl bg-amber-900 text-white text-xs font-semibold shrink-0 cursor-pointer"
+              className="w-full xs:w-auto min-h-[36px] px-3.5 py-1.5 rounded-xl bg-amber-900 text-white text-xs font-semibold shrink-0 cursor-pointer"
             >
               Enable GPS
             </button>
           </div>
         )}
 
-        {/* 3. TAB CONTENT: PEOPLE RADAR OR 500M LOCAL BUZZ */}
-        {activeTab === 'people' ? (
-          <section aria-label="Live user profiles within 500 meters" className="space-y-4">
-            {filteredUsers.length === 0 ? (
-              <div className="py-12 px-4 text-center bg-white border border-blue-200 rounded-3xl shadow-sm">
-                <p className="text-sm font-bold text-slate-800">
-                  No match found for "{searchQuery}"
-                </p>
-                <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
-                  Clear your search filter or reset range to see all active people within 500m.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSearchQuery('');
-                    setRangeFilter('all');
-                  }}
-                  className="mt-3.5 min-h-[38px] px-4 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-colors cursor-pointer"
-                >
-                  Show All Nearby Users
-                </button>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                {filteredUsers.map((person) => {
-                  const unreadCount = unreadByPeer[person.id] || 0;
-                  const isTypingNow = Boolean(typingPeers[person.id]);
-                  const presence = getPresenceStatus(person.lastSeenAt);
-
-                  return (
-                    <div
-                      key={person.id}
-                      onClick={() => setSelectedUserId(person.id)}
-                      className="relative group p-4 rounded-2xl border border-blue-200 bg-white hover:border-blue-400 hover:shadow-md transition-all flex items-center justify-between gap-3.5 cursor-pointer shadow-sm"
-                    >
-                      {unreadCount > 0 && (
-                        <span
-                          aria-label={`${unreadCount} unread messages`}
-                          className="absolute -top-2 -right-2 px-2.5 py-0.5 rounded-full bg-rose-600 text-white text-[11px] font-bold shadow-sm flex items-center gap-1"
-                        >
-                          <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
-                          <span>{unreadCount} new message</span>
-                        </span>
-                      )}
-
-                      <div className="flex items-center gap-3.5 min-w-0">
-                        <UserAvatar
-                          preset={person.avatarPreset}
-                          name={person.name}
-                          photoUrl={person.photoUrl}
-                          size="lg"
-                          showOnlineDot={true}
-                          isOnlineNow={presence.isOnlineNow}
-                        />
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <h2 className="text-sm sm:text-base font-bold text-slate-900 truncate group-hover:underline">
-                              {person.name}
-                            </h2>
-                            <span
-                              className={`text-[11px] font-semibold shrink-0 flex items-center gap-1 ${
-                                presence.isOnlineNow
-                                  ? 'text-emerald-600'
-                                  : 'text-amber-600'
-                              }`}
-                            >
-                              <span
-                                className={`w-1.5 h-1.5 rounded-full ${
-                                  presence.isOnlineNow
-                                    ? 'bg-emerald-500'
-                                    : 'bg-amber-400'
-                                }`}
-                              />
-                              {presence.label}
-                            </span>
-                          </div>
-                          <p className="text-xs text-slate-500 truncate mt-0.5">
-                            {isTypingNow ? (
-                              <span className="font-semibold text-blue-700">
-                                Typing a message...
-                              </span>
-                            ) : person.statusTag ? (
-                              <span className="font-medium text-blue-700">
-                                {person.statusTag} · {person.role}
-                              </span>
-                            ) : (
-                              person.role
-                            )}
-                          </p>
-                          <p className="text-xs text-slate-500 mt-1 flex items-center gap-1 truncate font-mono-tabular">
-                            <MapPin className="w-3 h-3 text-blue-600 shrink-0" />
-                            <span className="font-bold text-blue-700">
-                              {person.distanceMeters}m
-                            </span>
-                            {person.compassDir && (
-                              <>
-                                <span aria-hidden="true">·</span>
-                                <span className="font-semibold text-slate-700">
-                                  {person.compassDir}
-                                </span>
-                              </>
-                            )}
-                            <span aria-hidden="true">·</span>
-                            <span className="truncate font-sans">
-                              {person.wavedAtMe ? 'Said Hi 👋' : person.locationSpot}
-                            </span>
-                          </p>
-                        </div>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedUserId(person.id);
-                        }}
-                        className={`min-h-[40px] px-4 py-2 rounded-xl text-white text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer shadow-sm ${
-                          unreadCount > 0
-                            ? 'bg-rose-600 hover:bg-rose-700'
-                            : 'bg-blue-600 hover:bg-blue-700'
-                        }`}
-                      >
-                        {unreadCount > 0 ? `Reply (${unreadCount})` : 'Chat'}
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* Quick Invite Banner at Bottom of Radar */}
-            <div className="p-4 rounded-2xl bg-white border border-blue-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-sm">
-              <div className="space-y-0.5">
-                <p className="text-xs sm:text-sm font-bold text-slate-900 flex items-center gap-1.5">
-                  <Sparkles className="w-4 h-4 text-blue-600 shrink-0" />
-                  <span>Want your real friends around you on this radar?</span>
-                </p>
-                <p className="text-xs text-slate-500">
-                  Share the QR code or WhatsApp link with anyone sitting within 500m to see their live distance in meters.
-                </p>
-              </div>
-              <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto">
-                <a
-                  href={whatsAppInviteHref}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex-1 sm:flex-initial min-h-[38px] px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
-                >
-                  <Share2 className="w-3.5 h-3.5" />
-                  <span>WhatsApp Invite</span>
-                </a>
-                <button
-                  type="button"
-                  onClick={() => setIsInviteOpen(true)}
-                  className="min-h-[38px] px-3.5 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-                >
-                  <QrCode className="w-3.5 h-3.5" />
-                  <span>Show QR</span>
-                </button>
-              </div>
+        {/* 3. PEOPLE RADAR CARDS */}
+        <section aria-label="Live user profiles within 500 meters" className="space-y-3.5">
+          {filteredUsers.length === 0 ? (
+            <div className="py-10 px-4 text-center bg-white border border-blue-200 rounded-3xl shadow-sm">
+              <p className="text-sm font-bold text-slate-800">
+                No match found for "{searchQuery}"
+              </p>
+              <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
+                Clear your search filter or reset range to see all active people within 500m.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchQuery('');
+                  setRangeFilter('all');
+                }}
+                className="mt-3.5 min-h-[40px] px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-colors cursor-pointer"
+              >
+                Show All Nearby Users
+              </button>
             </div>
-          </section>
-        ) : (
-          /* 500m LOCAL BUZZ WALL TAB */
-          <section aria-label="500m Local Buzz Feed" className="space-y-4">
-            <form
-              onSubmit={handleCreateWallPost}
-              className="p-4 rounded-2xl bg-white border border-blue-200 shadow-sm space-y-3"
-            >
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-xs font-bold text-slate-800">
-                  Post to everyone within 500m ({currentUser.name})
-                </span>
-                <select
-                  value={newWallTag}
-                  onChange={(e) => setNewWallTag(e.target.value)}
-                  className="text-xs font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded-lg px-2.5 py-1 focus:outline-none"
-                >
-                  {STATUS_TAG_OPTIONS.map((tag) => (
-                    <option key={tag} value={tag}>
-                      {tag}
-                    </option>
-                  ))}
-                </select>
-              </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {filteredUsers.map((person) => {
+                const unreadCount = unreadByPeer[person.id] || 0;
+                const isTypingNow = Boolean(typingPeers[person.id]);
+                const presence = getPresenceStatus(person.lastSeenAt);
 
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  value={newWallText}
-                  onChange={(e) => setNewWallText(e.target.value)}
-                  placeholder="Ask anything or share an update with people within 500m..."
-                  maxLength={220}
-                  className="flex-1 min-h-[44px] px-3.5 py-2 rounded-xl bg-slate-50 border border-slate-200 text-sm text-slate-900 placeholder:text-slate-400 focus:bg-white focus:outline-none focus:border-blue-600"
-                />
-                <button
-                  type="submit"
-                  className="min-h-[44px] px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-colors flex items-center gap-1.5 shrink-0 cursor-pointer shadow-sm"
-                >
-                  <Send className="w-3.5 h-3.5" />
-                  <span>Post</span>
-                </button>
-              </div>
-            </form>
+                return (
+                  <div
+                    key={person.id}
+                    onClick={() => setSelectedUserId(person.id)}
+                    className="relative group p-3.5 sm:p-4 rounded-2xl border border-blue-200 bg-white hover:border-blue-400 active:scale-[0.99] transition-all flex items-center justify-between gap-2.5 sm:gap-3.5 cursor-pointer shadow-sm"
+                  >
+                    {unreadCount > 0 && (
+                      <span
+                        aria-label={`${unreadCount} unread messages`}
+                        className="absolute -top-2 right-3 px-2.5 py-0.5 rounded-full bg-rose-600 text-white text-[10px] sm:text-[11px] font-bold shadow-sm flex items-center gap-1"
+                      >
+                        <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
+                        <span>{unreadCount} new</span>
+                      </span>
+                    )}
 
-            <div className="space-y-3">
-              {wallPosts.map((post) => (
-                <div
-                  key={post.id}
-                  className="p-4 rounded-2xl bg-white border border-blue-200 shadow-sm space-y-2.5"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <div
-                      onClick={() => {
-                        if (post.authorId !== currentUser.id) {
-                          setSelectedUserId(post.authorId);
-                        } else {
-                          setIsMyProfileOpen(true);
-                        }
-                      }}
-                      className="flex items-center gap-2.5 cursor-pointer group"
-                    >
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
                       <UserAvatar
-                        preset={post.authorAvatar}
-                        name={post.authorName}
-                        photoUrl={post.authorPhotoUrl}
-                        size="sm"
+                        preset={person.avatarPreset}
+                        name={person.name}
+                        photoUrl={person.photoUrl}
+                        size="lg"
+                        className="shrink-0"
                         showOnlineDot={true}
-                        isOnlineNow={true}
+                        isOnlineNow={presence.isOnlineNow}
                       />
-                      <div>
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-xs sm:text-sm font-bold text-slate-900 group-hover:underline">
-                            {post.authorName}
-                          </span>
-                          <span className="text-[11px] font-semibold text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-md">
-                            {post.tag}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <h2 className="text-sm sm:text-base font-bold text-slate-900 truncate group-hover:underline">
+                            {person.name}
+                          </h2>
+                          <span
+                            className={`text-[10px] sm:text-[11px] font-semibold shrink-0 flex items-center gap-1 ${
+                              presence.isOnlineNow
+                                ? 'text-emerald-600'
+                                : 'text-amber-600'
+                            }`}
+                          >
+                            <span
+                              className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                                presence.isOnlineNow
+                                  ? 'bg-emerald-500'
+                                  : 'bg-amber-400'
+                              }`}
+                            />
+                            <span>{presence.label}</span>
                           </span>
                         </div>
-                        <p className="text-[11px] text-slate-500 font-mono-tabular">
-                          {post.authorRole} · {post.distanceMeters}m away ·{' '}
-                          {formatRelativeTime(post.createdAt)}
+                        <p className="text-xs text-slate-500 truncate mt-0.5">
+                          {isTypingNow ? (
+                            <span className="font-semibold text-blue-700">
+                              Typing a message...
+                            </span>
+                          ) : person.statusTag ? (
+                            <span className="font-medium text-blue-700">
+                              {person.statusTag} · {person.role}
+                            </span>
+                          ) : (
+                            person.role
+                          )}
+                        </p>
+                        <p className="text-[11px] sm:text-xs text-slate-500 mt-1 flex items-center gap-1 truncate font-mono-tabular">
+                          <MapPin className="w-3 h-3 text-blue-600 shrink-0" />
+                          <span className="font-bold text-blue-700 shrink-0">
+                            {person.distanceMeters}m
+                          </span>
+                          {person.compassDir && (
+                            <>
+                              <span aria-hidden="true">·</span>
+                              <span className="font-semibold text-slate-700 shrink-0">
+                                {person.compassDir}
+                              </span>
+                            </>
+                          )}
+                          <span aria-hidden="true">·</span>
+                          <span className="truncate font-sans">
+                            {person.wavedAtMe ? 'Said Hi 👋' : person.locationSpot}
+                          </span>
                         </p>
                       </div>
                     </div>
 
-                    {post.authorId !== currentUser.id && (
-                      <button
-                        type="button"
-                        onClick={() => setSelectedUserId(post.authorId)}
-                        className="min-h-[32px] px-3 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold transition-colors cursor-pointer"
-                      >
-                        Reply in Chat
-                      </button>
-                    )}
-                  </div>
-
-                  <p className="text-xs sm:text-sm text-slate-800 leading-relaxed pl-1">
-                    {post.text}
-                  </p>
-
-                  <div className="flex items-center gap-4 pt-1">
                     <button
                       type="button"
-                      onClick={() => handleToggleLikeWallPost(post.id)}
-                      className={`text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-colors ${
-                        post.likedByMe
-                          ? 'text-rose-600'
-                          : 'text-slate-500 hover:text-rose-600'
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedUserId(person.id);
+                      }}
+                      className={`min-h-[38px] sm:min-h-[40px] px-3.5 sm:px-4 py-2 rounded-xl text-white text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer shadow-sm ${
+                        unreadCount > 0
+                          ? 'bg-rose-600 hover:bg-rose-700'
+                          : 'bg-blue-600 hover:bg-blue-700'
                       }`}
                     >
-                      <Heart
-                        className={`w-3.5 h-3.5 ${
-                          post.likedByMe ? 'fill-rose-600 text-rose-600' : ''
-                        }`}
-                      />
-                      <span>{post.likes}</span>
+                      {unreadCount > 0 ? `Reply (${unreadCount})` : 'Chat'}
                     </button>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
-          </section>
-        )}
+          )}
+
+          {/* Quick Invite Banner at Bottom of Radar */}
+          <div className="p-3.5 sm:p-4 rounded-2xl bg-white border border-blue-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-sm">
+            <div className="space-y-0.5">
+              <p className="text-xs sm:text-sm font-bold text-slate-900 flex items-center gap-1.5">
+                <Sparkles className="w-4 h-4 text-blue-600 shrink-0" />
+                <span>Want your real friends around you on this radar?</span>
+              </p>
+              <p className="text-xs text-slate-500 leading-relaxed">
+                Share the QR code or WhatsApp link with anyone sitting within 500m to see their live distance in meters.
+              </p>
+            </div>
+            <div className="grid grid-cols-2 sm:flex items-center gap-2 shrink-0 w-full sm:w-auto">
+              <a
+                href={whatsAppInviteHref}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="min-h-[40px] px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
+              >
+                <Share2 className="w-3.5 h-3.5 shrink-0" />
+                <span>WhatsApp Invite</span>
+              </a>
+              <button
+                type="button"
+                onClick={() => setIsInviteOpen(true)}
+                className="min-h-[40px] px-3.5 py-2 rounded-xl bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <QrCode className="w-3.5 h-3.5 shrink-0" />
+                <span>Show QR</span>
+              </button>
+            </div>
+          </div>
+        </section>
       </main>
 
       {/* Invite Nearby QR & Share Modal */}
       {isInviteOpen && (
         <div
-          className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4"
           onClick={() => setIsInviteOpen(false)}
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="bg-white w-full max-w-sm rounded-3xl border border-blue-200 p-6 text-center space-y-4 shadow-xl"
+            className="bg-white w-full sm:max-w-sm rounded-t-3xl sm:rounded-3xl border border-blue-200 p-5 sm:p-6 pb-[max(1.25rem,env(safe-area-inset-bottom))] text-center space-y-4 shadow-xl max-h-[92dvh] overflow-y-auto"
           >
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold uppercase tracking-wider text-blue-700">
@@ -1769,14 +1520,14 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => setIsInviteOpen(false)}
-                className="w-8 h-8 rounded-full text-slate-400 hover:text-slate-700 flex items-center justify-center cursor-pointer"
+                className="w-9 h-9 rounded-full text-slate-400 hover:text-slate-700 flex items-center justify-center cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <div className="space-y-1">
-              <h2 className="text-lg font-bold text-slate-900">
+              <h2 className="text-base sm:text-lg font-bold text-slate-900">
                 Scan or Share Within 500m
               </h2>
               <p className="text-xs text-slate-500">
@@ -1784,13 +1535,13 @@ export default function App() {
               </p>
             </div>
 
-            <div className="p-4 bg-blue-50 border border-blue-200 rounded-2xl inline-block mx-auto">
+            <div className="p-3.5 sm:p-4 bg-blue-50 border border-blue-200 rounded-2xl inline-block mx-auto">
               <img
                 src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(
                   appShareUrl
                 )}`}
                 alt="Near500 QR Code"
-                className="w-44 h-44 rounded-xl bg-white p-2 mx-auto"
+                className="w-40 h-40 sm:w-44 sm:h-44 rounded-xl bg-white p-2 mx-auto"
               />
             </div>
 
@@ -1799,12 +1550,12 @@ export default function App() {
                 type="text"
                 readOnly
                 value={appShareUrl}
-                className="flex-1 bg-transparent text-xs text-slate-700 font-mono-tabular truncate focus:outline-none px-1"
+                className="flex-1 bg-transparent text-xs text-slate-700 font-mono-tabular truncate focus:outline-none px-1 min-w-0"
               />
               <button
                 type="button"
                 onClick={handleCopyShareLink}
-                className="min-h-[34px] px-3 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold flex items-center gap-1 shrink-0 cursor-pointer"
+                className="min-h-[36px] px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold flex items-center gap-1 shrink-0 cursor-pointer"
               >
                 {copiedLink ? (
                   <>

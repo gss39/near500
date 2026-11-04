@@ -222,17 +222,17 @@ export const UserDetailModal: React.FC<UserDetailModalProps> = ({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-2xl border border-blue-200 overflow-hidden flex flex-col max-h-[90vh] shadow-xl"
+        className="bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-2xl border border-blue-200 overflow-hidden flex flex-col max-h-[92dvh] sm:max-h-[88vh] shadow-xl"
       >
         {/* Top bar: Compass Direction + Online Status + Clear Chat + Block User + Close */}
-        <div className="flex items-center justify-between px-5 pt-4 pb-2.5 bg-blue-50 gap-2">
+        <div className="flex items-center justify-between px-4 sm:px-5 pt-3.5 pb-2 bg-blue-50 gap-2 shrink-0">
           <span className="text-xs font-semibold text-blue-700 font-mono-tabular truncate flex items-center gap-1.5">
             <span
               className={`w-2 h-2 rounded-full shrink-0 ${
                 presence.isOnlineNow ? 'bg-emerald-500' : 'bg-amber-400'
               }`}
             />
-            <span>
+            <span className="truncate">
               {user.distanceMeters}m away
               {user.compassDir ? ` · ${user.compassDir}` : ''} · {presence.label}
             </span>
@@ -244,17 +244,17 @@ export const UserDetailModal: React.FC<UserDetailModalProps> = ({
                 type="button"
                 onClick={() => onClearChat(user.id)}
                 title="Clear chat history"
-                className="min-h-[32px] px-2.5 py-1 rounded-lg text-[11px] font-semibold text-slate-600 hover:text-rose-700 hover:bg-white/80 flex items-center gap-1 transition-colors cursor-pointer"
+                className="min-h-[34px] px-2 sm:px-2.5 py-1 rounded-lg text-[11px] font-semibold text-slate-600 hover:text-rose-700 hover:bg-white/80 flex items-center gap-1 transition-colors cursor-pointer"
               >
                 <Trash2 className="w-3.5 h-3.5" />
-                <span>Clear Chat</span>
+                <span className="hidden xs:inline">Clear</span>
               </button>
             )}
             <button
               type="button"
               onClick={() => onBlockUser(user)}
               title="Block or hide this user"
-              className="min-h-[32px] px-2.5 py-1 rounded-lg text-[11px] font-semibold text-slate-600 hover:text-rose-700 hover:bg-white/80 flex items-center gap-1 transition-colors cursor-pointer"
+              className="min-h-[34px] px-2 sm:px-2.5 py-1 rounded-lg text-[11px] font-semibold text-slate-600 hover:text-rose-700 hover:bg-white/80 flex items-center gap-1 transition-colors cursor-pointer"
             >
               <Ban className="w-3.5 h-3.5" />
               <span>Block</span>
@@ -263,53 +263,57 @@ export const UserDetailModal: React.FC<UserDetailModalProps> = ({
               type="button"
               onClick={onClose}
               aria-label="Close profile"
-              className="min-w-[36px] min-h-[36px] -mr-1 rounded-full text-slate-400 hover:text-slate-800 hover:bg-white/80 flex items-center justify-center transition-colors cursor-pointer"
+              className="min-w-[38px] min-h-[38px] -mr-1 rounded-full text-slate-400 hover:text-slate-800 hover:bg-white/80 flex items-center justify-center transition-colors cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
           </div>
         </div>
 
-        {/* User Info */}
-        <div className="px-6 pb-4 pt-1 text-center border-b border-blue-100 flex flex-col items-center bg-blue-50">
-          <UserAvatar
-            preset={user.avatarPreset}
-            name={user.name}
-            photoUrl={user.photoUrl}
-            size="xl"
-            showOnlineDot={true}
-            isOnlineNow={presence.isOnlineNow}
-          />
-          <h2 id="modal-user-name" className="text-lg font-bold text-slate-900 mt-2.5">
-            {user.name}
-          </h2>
-          <p className="text-xs text-slate-600 mt-0.5">
-            {user.role} · {user.locationSpot}
-          </p>
+        {/* User Info (Compact on Mobile so Chat Room has plenty of height) */}
+        <div className="px-4 sm:px-6 pb-3.5 pt-1 border-b border-blue-100 bg-blue-50 shrink-0">
+          <div className="flex sm:flex-col items-center sm:text-center gap-3 sm:gap-0">
+            <UserAvatar
+              preset={user.avatarPreset}
+              name={user.name}
+              photoUrl={user.photoUrl}
+              size="lg"
+              className="sm:w-16 sm:h-16 shrink-0"
+              showOnlineDot={true}
+              isOnlineNow={presence.isOnlineNow}
+            />
+            <div className="min-w-0 flex-1 sm:mt-2">
+              <div className="flex items-center sm:justify-center gap-1.5 flex-wrap">
+                <h2 id="modal-user-name" className="text-base sm:text-lg font-bold text-slate-900 truncate">
+                  {user.name}
+                </h2>
+                {user.statusTag && (
+                  <span className="px-2 py-0.5 rounded-md bg-white border border-blue-200 text-blue-700 text-[11px] font-semibold shadow-2xs">
+                    {user.statusTag}
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-slate-600 mt-0.5 truncate">
+                {user.role} · {user.locationSpot}
+              </p>
+              {user.bio && (
+                <p className="text-xs text-slate-600 mt-1 sm:mt-2 line-clamp-2 sm:max-w-xs sm:mx-auto leading-relaxed">
+                  {user.bio}
+                </p>
+              )}
+              {user.wavedAtMe && (
+                <p className="mt-1 text-xs font-semibold text-blue-700">
+                  {user.name.split(' ')[0]} said Hi to you 👋
+                </p>
+              )}
+            </div>
+          </div>
 
-          {user.statusTag && (
-            <span className="mt-2 px-3 py-0.5 rounded-lg bg-white border border-blue-200 text-blue-700 text-xs font-semibold shadow-sm">
-              {user.statusTag}
-            </span>
-          )}
-
-          {user.bio && (
-            <p className="text-xs sm:text-sm text-slate-600 mt-2.5 max-w-xs leading-relaxed">
-              {user.bio}
-            </p>
-          )}
-
-          {user.wavedAtMe && (
-            <p className="mt-1.5 text-xs font-semibold text-blue-700">
-              {user.name.split(' ')[0]} said Hi to you 👋
-            </p>
-          )}
-
-          <div className="mt-3 flex items-center justify-center gap-2 flex-wrap">
+          <div className="mt-3 grid grid-cols-2 sm:flex items-center justify-center gap-2">
             <button
               type="button"
               onClick={() => onToggleWave(user.id)}
-              className={`min-h-[38px] px-4 py-1.5 rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 cursor-pointer ${
+              className={`min-h-[38px] px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 cursor-pointer ${
                 user.waved
                   ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
                   : 'bg-white border border-blue-200 text-blue-700 hover:bg-blue-100/50 shadow-sm'
@@ -317,7 +321,7 @@ export const UserDetailModal: React.FC<UserDetailModalProps> = ({
             >
               {user.waved ? (
                 <>
-                  <Check className="w-3.5 h-3.5 text-emerald-600" />
+                  <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                   <span>Said Hi</span>
                 </>
               ) : (
@@ -330,17 +334,17 @@ export const UserDetailModal: React.FC<UserDetailModalProps> = ({
               onClick={handleShareCurrentSpot}
               className="min-h-[38px] px-3.5 py-1.5 rounded-xl bg-white border border-blue-200 text-blue-700 hover:bg-blue-100/50 text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
             >
-              <MapPin className="w-3.5 h-3.5 text-blue-600" />
+              <MapPin className="w-3.5 h-3.5 text-blue-600 shrink-0" />
               <span>Share My Spot 📍</span>
             </button>
           </div>
         </div>
 
         {/* Live Chat Box */}
-        <div className="p-4 sm:p-5 flex-1 overflow-y-auto flex flex-col justify-between bg-white">
-          <div className="space-y-3 max-h-56 overflow-y-auto mb-3 pr-1">
+        <div className="p-3.5 sm:p-5 pb-[max(0.875rem,env(safe-area-inset-bottom))] flex-1 min-h-0 flex flex-col justify-between bg-white">
+          <div className="space-y-3 flex-1 min-h-[160px] max-h-[38dvh] sm:max-h-60 overflow-y-auto mb-3 pr-1">
             {messages.length === 0 && !isPeerTyping ? (
-              <p className="text-xs text-slate-400 text-center py-4">
+              <p className="text-xs text-slate-400 text-center py-6">
                 Send a message, photo, voice note, or live spot to {user.name.split(' ')[0]}
               </p>
             ) : (
@@ -354,7 +358,7 @@ export const UserDetailModal: React.FC<UserDetailModalProps> = ({
                     className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}
                   >
                     <div
-                      className={`px-3.5 py-2 rounded-2xl text-xs max-w-[85%] space-y-1.5 ${
+                      className={`px-3.5 py-2 rounded-2xl text-xs sm:text-sm max-w-[85%] space-y-1.5 break-words ${
                         isMe
                           ? 'bg-blue-600 text-white'
                           : 'bg-blue-50 border border-blue-200 text-slate-800'
@@ -394,7 +398,7 @@ export const UserDetailModal: React.FC<UserDetailModalProps> = ({
                     </div>
 
                     {/* Emoji Reactions Bar + Seen Receipt */}
-                    <div className="mt-1 flex items-center gap-2 flex-wrap">
+                    <div className="mt-1 flex items-center gap-1.5 flex-wrap">
                       <div className="flex items-center gap-0.5 bg-slate-50 border border-slate-200/80 rounded-full px-1.5 py-0.5">
                         {REACTION_EMOJIS.map((emoji) => {
                           const myReaction = msg.reactions?.[currentUser.id] === emoji;
@@ -403,7 +407,7 @@ export const UserDetailModal: React.FC<UserDetailModalProps> = ({
                               key={emoji}
                               type="button"
                               onClick={() => onReactMessage(user.id, msg.id, emoji)}
-                              className={`text-[11px] px-1 rounded-full transition-transform hover:scale-110 cursor-pointer ${
+                              className={`text-xs px-1 rounded-full transition-transform active:scale-125 cursor-pointer ${
                                 myReaction ? 'bg-blue-100 font-bold' : 'opacity-70 hover:opacity-100'
                               }`}
                             >
@@ -467,7 +471,7 @@ export const UserDetailModal: React.FC<UserDetailModalProps> = ({
                 <img
                   src={attachedImage}
                   alt="Attachment preview"
-                  className="h-14 w-14 rounded-lg border border-blue-200 object-cover"
+                  className="h-12 w-12 rounded-lg border border-blue-200 object-cover"
                 />
                 <span className="text-xs font-semibold text-blue-800">
                   Photo ready to send
@@ -484,7 +488,7 @@ export const UserDetailModal: React.FC<UserDetailModalProps> = ({
             </div>
           )}
 
-          <form onSubmit={handleSend} className="flex items-center gap-1.5">
+          <form onSubmit={handleSend} className="flex items-center gap-1.5 shrink-0">
             {/* Photo Share Button */}
             <label
               title="Share photo in chat"
@@ -528,12 +532,12 @@ export const UserDetailModal: React.FC<UserDetailModalProps> = ({
               onChange={handleDraftChange}
               placeholder={
                 isRecording
-                  ? 'Recording voice note... tap red button to send'
+                  ? 'Recording voice note...'
                   : isUploadingChatImg
                   ? 'Loading photo...'
                   : `Message ${user.name.split(' ')[0]}...`
               }
-              className="flex-1 min-h-[44px] px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-sm text-slate-900 placeholder:text-slate-400 focus:bg-white focus:outline-none focus:border-blue-600 min-w-0"
+              className="flex-1 min-h-[44px] px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-base sm:text-sm text-slate-900 placeholder:text-slate-400 focus:bg-white focus:outline-none focus:border-blue-600 min-w-0"
             />
             <button
               type="submit"
@@ -653,9 +657,9 @@ export const CurrentUserModal: React.FC<CurrentUserModalProps> = ({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-2xl border border-blue-200 overflow-hidden flex flex-col max-h-[90vh] shadow-xl"
+        className="bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-2xl border border-blue-200 overflow-hidden flex flex-col max-h-[92dvh] sm:max-h-[90vh] shadow-xl"
       >
-        <div className="flex items-center justify-between px-5 py-4 border-b border-blue-100 bg-blue-50">
+        <div className="flex items-center justify-between px-4 sm:px-5 py-3.5 sm:py-4 border-b border-blue-100 bg-blue-50 shrink-0">
           <h2 id="my-profile-title" className="text-base font-bold text-slate-900">
             My Live Profile
           </h2>
@@ -669,9 +673,9 @@ export const CurrentUserModal: React.FC<CurrentUserModalProps> = ({
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-5 space-y-4 overflow-y-auto">
+        <form onSubmit={handleSubmit} className="p-4 sm:p-5 pb-[max(1rem,env(safe-area-inset-bottom))] space-y-4 overflow-y-auto">
           {/* Feature 1: Real Photo Upload (Inside Profile Only) + Avatar Styles */}
-          <div className="flex items-center gap-4 pb-3 border-b border-slate-100">
+          <div className="flex items-center gap-3.5 sm:gap-4 pb-3 border-b border-slate-100">
             <label
               title="Tap to upload real photo"
               className="relative cursor-pointer group shrink-0"
@@ -695,14 +699,14 @@ export const CurrentUserModal: React.FC<CurrentUserModalProps> = ({
 
             <div className="space-y-2 flex-1 min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
-                <label className="min-h-[36px] px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-sm relative overflow-hidden">
+                <label className="min-h-[36px] px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-sm relative overflow-hidden">
                   <input
                     type="file"
                     accept="image/*"
                     onChange={handlePhotoUpload}
                     className="sr-only"
                   />
-                  <Camera className="w-3.5 h-3.5" />
+                  <Camera className="w-3.5 h-3.5 shrink-0" />
                   <span>Upload Real Photo</span>
                 </label>
                 {formState.photoUrl && (
@@ -723,7 +727,7 @@ export const CurrentUserModal: React.FC<CurrentUserModalProps> = ({
                 </p>
               )}
 
-              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 pt-0.5">
+              <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-1 pt-0.5">
                 {AVATAR_PRESET_LIST.map((item) => (
                   <button
                     key={item.id}
@@ -800,7 +804,7 @@ export const CurrentUserModal: React.FC<CurrentUserModalProps> = ({
                   isDiscoverableUnder500m: !prev.isDiscoverableUnder500m,
                 }))
               }
-              className={`min-w-[48px] min-h-[28px] p-0.5 rounded-full transition-colors flex items-center cursor-pointer ${
+              className={`min-w-[48px] min-h-[28px] p-0.5 rounded-full transition-colors flex items-center shrink-0 cursor-pointer ${
                 formState.isDiscoverableUnder500m
                   ? 'bg-blue-600 justify-end'
                   : 'bg-slate-300 justify-start'
@@ -819,7 +823,7 @@ export const CurrentUserModal: React.FC<CurrentUserModalProps> = ({
               required
               value={formState.name}
               onChange={(e) => setFormState({ ...formState, name: e.target.value })}
-              className="w-full min-h-[44px] px-3.5 py-2 rounded-xl border border-slate-200 text-sm text-slate-900 focus:outline-none focus:border-blue-600"
+              className="w-full min-h-[44px] px-3.5 py-2 rounded-xl border border-slate-200 text-base sm:text-sm text-slate-900 focus:outline-none focus:border-blue-600"
             />
           </div>
 
@@ -833,7 +837,7 @@ export const CurrentUserModal: React.FC<CurrentUserModalProps> = ({
                 required
                 value={formState.role}
                 onChange={(e) => setFormState({ ...formState, role: e.target.value })}
-                className="w-full min-h-[44px] px-3.5 py-2 rounded-xl border border-slate-200 text-sm text-slate-900 focus:outline-none focus:border-blue-600"
+                className="w-full min-h-[44px] px-3.5 py-2 rounded-xl border border-slate-200 text-base sm:text-sm text-slate-900 focus:outline-none focus:border-blue-600"
               />
             </div>
 
@@ -848,7 +852,7 @@ export const CurrentUserModal: React.FC<CurrentUserModalProps> = ({
                 onChange={(e) =>
                   setFormState({ ...formState, locationSpot: e.target.value })
                 }
-                className="w-full min-h-[44px] px-3.5 py-2 rounded-xl border border-slate-200 text-sm text-slate-900 focus:outline-none focus:border-blue-600"
+                className="w-full min-h-[44px] px-3.5 py-2 rounded-xl border border-slate-200 text-base sm:text-sm text-slate-900 focus:outline-none focus:border-blue-600"
               />
             </div>
           </div>
@@ -861,7 +865,7 @@ export const CurrentUserModal: React.FC<CurrentUserModalProps> = ({
               rows={2}
               value={formState.bio}
               onChange={(e) => setFormState({ ...formState, bio: e.target.value })}
-              className="w-full px-3.5 py-2 rounded-xl border border-slate-200 text-sm text-slate-900 focus:outline-none focus:border-blue-600"
+              className="w-full px-3.5 py-2 rounded-xl border border-slate-200 text-base sm:text-sm text-slate-900 focus:outline-none focus:border-blue-600"
             />
           </div>
 
@@ -922,17 +926,17 @@ export const CurrentUserModal: React.FC<CurrentUserModalProps> = ({
             )}
           </div>
 
-          <div className="pt-2 flex items-center justify-end gap-2">
+          <div className="pt-2 grid grid-cols-2 sm:flex items-center justify-end gap-2">
             <button
               type="button"
               onClick={onClose}
-              className="min-h-[42px] px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
+              className="min-h-[44px] px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-colors cursor-pointer"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="min-h-[42px] px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-colors cursor-pointer"
+              className="min-h-[44px] px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-colors cursor-pointer shadow-sm"
             >
               Save Profile
             </button>
