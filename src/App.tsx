@@ -10,7 +10,6 @@ import {
   Copy,
   Check,
   Sparkles,
-  Users,
 } from 'lucide-react';
 import {
   loadOrCreateCurrentUser,
@@ -1113,11 +1112,6 @@ export default function App() {
     return unread;
   }, [messages, currentUser.id, readCountsByPeer, selectedUserId]);
 
-  const totalUnreadMessages = useMemo(
-    () => Object.values(unreadByPeer).reduce((acc, c) => acc + c, 0),
-    [unreadByPeer]
-  );
-
   // Filter live users strictly <= 500m
   const filteredUsers = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -1191,23 +1185,24 @@ export default function App() {
               <span className="sm:hidden">Invite</span>
             </button>
 
-            {/* Top-Right: Current User Profile */}
+            {/* Top-Right: Current User Profile (Only Icon on Mobile, Icon + Name on Desktop) */}
             <button
               type="button"
               onClick={() => setIsMyProfileOpen(true)}
               aria-label="Open my profile"
-              className="min-h-[38px] sm:min-h-[40px] pl-1.5 pr-2.5 sm:pr-3 py-1 rounded-full bg-blue-50/70 border border-blue-200 hover:bg-blue-100/70 transition-all flex items-center gap-1.5 sm:gap-2 min-w-0 cursor-pointer shadow-sm"
+              title={currentUser.name}
+              className="p-1 sm:min-h-[40px] sm:pl-1.5 sm:pr-3 sm:py-1 rounded-full bg-blue-50/70 border border-blue-200 hover:bg-blue-100/70 transition-all flex items-center gap-2 shrink-0 cursor-pointer shadow-sm"
             >
               <UserAvatar
                 preset={currentUser.avatarPreset}
                 name={currentUser.name}
                 photoUrl={currentUser.photoUrl}
                 size="sm"
-                className="w-7 h-7 rounded-full shrink-0"
+                className="w-8 h-8 sm:w-7 sm:h-7 rounded-full shrink-0"
                 showOnlineDot={gpsState === 'live' && currentUser.isDiscoverableUnder500m}
                 isOnlineNow={true}
               />
-              <span className="text-xs sm:text-sm font-semibold text-slate-800 max-w-[78px] xs:max-w-[100px] sm:max-w-[140px] truncate">
+              <span className="hidden sm:inline text-sm font-semibold text-slate-800 max-w-[140px] truncate">
                 {currentUser.name}
               </span>
             </button>
@@ -1217,8 +1212,8 @@ export default function App() {
 
       {/* MAIN CONTENT */}
       <main className="flex-1 w-full max-w-4xl mx-auto px-3 sm:px-6 py-3.5 sm:py-5 space-y-4">
-        {/* 2. AFTER HEADER: Search Bar + Radar Controls */}
-        <section aria-label="Search live users under 500m" className="space-y-3">
+        {/* 2. AFTER HEADER: Search Bar + Range & GPS Controls */}
+        <section aria-label="Search live users under 500m" className="space-y-2.5">
           <div className="relative">
             <Search
               className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600 absolute left-3.5 sm:left-4 top-1/2 -translate-y-1/2 pointer-events-none"
@@ -1244,25 +1239,51 @@ export default function App() {
             )}
           </div>
 
-          {/* Radar Header Bar: Nearby Count + GPS Status + Refresh */}
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2 min-w-0">
-              <div className="min-h-[36px] px-3 py-1.5 rounded-xl bg-blue-600 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm shrink-0">
-                <Users className="w-3.5 h-3.5 shrink-0" />
-                <span>Nearby Radar ({filteredUsers.length})</span>
-                {totalUnreadMessages > 0 && (
-                  <span className="px-1.5 py-0.5 rounded-full bg-rose-500 text-white text-[10px] leading-none">
-                    {totalUnreadMessages}
-                  </span>
-                )}
-              </div>
+          {/* Range Filters + GPS Status & Refresh Bar */}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            {/* Distance Range Filters */}
+            <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+              <button
+                type="button"
+                onClick={() => setRangeFilter('all')}
+                className={`min-h-[34px] px-2.5 sm:px-3 py-1 rounded-xl text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                  rangeFilter === 'all'
+                    ? 'bg-blue-600 text-white shadow-2xs'
+                    : 'bg-white text-slate-600 border border-blue-100 hover:text-slate-900'
+                }`}
+              >
+                All under 500m
+              </button>
+              <button
+                type="button"
+                onClick={() => setRangeFilter('250')}
+                className={`min-h-[34px] px-2.5 sm:px-3 py-1 rounded-xl text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                  rangeFilter === '250'
+                    ? 'bg-blue-600 text-white shadow-2xs'
+                    : 'bg-white text-slate-600 border border-blue-100 hover:text-slate-900'
+                }`}
+              >
+                Under 250m
+              </button>
+              <button
+                type="button"
+                onClick={() => setRangeFilter('100')}
+                className={`min-h-[34px] px-2.5 sm:px-3 py-1 rounded-xl text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                  rangeFilter === '100'
+                    ? 'bg-blue-600 text-white shadow-2xs'
+                    : 'bg-white text-slate-600 border border-blue-100 hover:text-slate-900'
+                }`}
+              >
+                Under 100m
+              </button>
             </div>
 
-            <div className="flex items-center gap-1.5 shrink-0">
+            {/* GPS Status + Refresh */}
+            <div className="flex items-center gap-1.5 shrink-0 ml-auto">
               <button
                 type="button"
                 onClick={requestLiveLocation}
-                className="min-h-[36px] px-2.5 sm:px-3.5 py-1.5 rounded-xl bg-white border border-blue-200 text-[11px] sm:text-xs font-semibold text-blue-700 hover:bg-blue-50 transition-colors flex items-center gap-1.5 cursor-pointer shadow-sm"
+                className="min-h-[34px] px-2.5 sm:px-3 py-1 rounded-xl bg-white border border-blue-200 text-[11px] sm:text-xs font-semibold text-blue-700 hover:bg-blue-50 transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
               >
                 <Navigation className="w-3.5 h-3.5 shrink-0" />
                 <span className="font-mono-tabular">
@@ -1279,49 +1300,12 @@ export default function App() {
                 onClick={() => syncWithServer(currentUser, true)}
                 aria-label="Refresh radar"
                 title="Refresh radar"
-                className="min-h-[36px] px-2.5 sm:px-3 py-1.5 rounded-xl bg-white border border-blue-200 text-xs font-semibold text-blue-700 hover:bg-blue-50 transition-colors flex items-center gap-1.5 cursor-pointer shadow-sm"
+                className="min-h-[34px] px-2.5 sm:px-3 py-1 rounded-xl bg-white border border-blue-200 text-xs font-semibold text-blue-700 hover:bg-blue-50 transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
               >
                 <RefreshCw className="w-3.5 h-3.5 shrink-0" />
                 <span className="hidden sm:inline">Refresh</span>
               </button>
             </div>
-          </div>
-
-          {/* Distance Range Filters (Scrollable on narrow mobile screens) */}
-          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-0.5">
-            <button
-              type="button"
-              onClick={() => setRangeFilter('all')}
-              className={`min-h-[34px] px-3 py-1 rounded-xl text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                rangeFilter === 'all'
-                  ? 'bg-blue-100 text-blue-800 border border-blue-300 shadow-2xs'
-                  : 'bg-white text-slate-600 border border-blue-100 hover:text-slate-900'
-              }`}
-            >
-              All under 500m
-            </button>
-            <button
-              type="button"
-              onClick={() => setRangeFilter('250')}
-              className={`min-h-[34px] px-3 py-1 rounded-xl text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                rangeFilter === '250'
-                  ? 'bg-blue-100 text-blue-800 border border-blue-300 shadow-2xs'
-                  : 'bg-white text-slate-600 border border-blue-100 hover:text-slate-900'
-              }`}
-            >
-              Under 250m
-            </button>
-            <button
-              type="button"
-              onClick={() => setRangeFilter('100')}
-              className={`min-h-[34px] px-3 py-1 rounded-xl text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                rangeFilter === '100'
-                  ? 'bg-blue-100 text-blue-800 border border-blue-300 shadow-2xs'
-                  : 'bg-white text-slate-600 border border-blue-100 hover:text-slate-900'
-              }`}
-            >
-              Under 100m
-            </button>
           </div>
         </section>
 
