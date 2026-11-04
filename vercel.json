@@ -1,0 +1,8 @@
+{
+  "installCommand": "echo 'Using prebuilt dist'",
+  "buildCommand": "echo 'Using prebuilt dist'",
+  "outputDirectory": "dist",
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}

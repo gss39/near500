@@ -1,0 +1,49 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+    --theme-bg: #eff6ff;
+    --theme-bg-subtle: #dbeafe;
+    --theme-primary: #2563eb;
+    --theme-primary-hover: #1d4ed8;
+    --theme-primary-light: #eff6ff;
+    --theme-border: #bfdbfe;
+    --theme-text-accent: #1d4ed8;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    background-color: var(--theme-bg);
+    color: #0f172a;
+  }
+
+  h1, h2, h3, h4 {
+    text-wrap: balance;
+  }
+}
+
+.font-mono-tabular {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.theme-bg-primary {
+  background-color: var(--theme-primary);
+}
+.theme-bg-primary:hover {
+  background-color: var(--theme-primary-hover);
+}
+.theme-bg-light {
+  background-color: var(--theme-primary-light);
+}
+.theme-bg-subtle {
+  background-color: var(--theme-bg-subtle);
+}
+.theme-text-accent {
+  color: var(--theme-text-accent);
+}
+.theme-border {
+  border-color: var(--theme-border);
+}

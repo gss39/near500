@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <script>
+      (function () {
+        try {
+          var nativeFetch = window.fetch ? window.fetch.bind(window) : undefined;
+          var desc =
+            Object.getOwnPropertyDescriptor(window, 'fetch') ||
+            Object.getOwnPropertyDescriptor(Window.prototype, 'fetch');
+          if (desc && desc.configurable && (!desc.writable && !desc.set)) {
+            var currentFetch = nativeFetch;
+            Object.defineProperty(window, 'fetch', {
+              configurable: true,
+              enumerable: true,
+              get: function () {
+                return currentFetch;
+              },
+              set: function (fn) {
+                if (typeof fn === 'function') {
+                  currentFetch = fn;
+                }
+              },
+            });
+          }
+        } catch (e) {}
+
+        window.addEventListener(
+          'error',
+          function (event) {
+            var msg = String((event && event.message) || '');
+            var file = String((event && event.filename) || '');
+            if (
+              file.indexOf('chrome-extension://') !== -1 ||
+              msg.indexOf('Cannot set property fetch') !== -1
+            ) {
+              event.stopImmediatePropagation();
+              event.preventDefault();
+              return false;
+            }
+          },
+          true
+        );
+      })();
+    </script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+    <title>Near500 — 500m Proximity Profile Discovery</title>
+    <meta name="description" content="Discover and connect with people automatically as soon as they enter within a 500-meter radius around you." />
+    <meta property="og:title" content="Near500 — 500m Proximity Profile Discovery" />
+    <meta property="og:description" content="Discover and connect with people automatically as soon as they enter within a 500-meter radius around you." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      if (window.tailwind) {
+        window.tailwind.config = {
+          theme: {
+            extend: {
+              fontFamily: {
+                sans: ['Plus Jakarta Sans', 'system-ui', '-apple-system', 'sans-serif'],
+                mono: ['JetBrains Mono', 'monospace'],
+              },
+            },
+          },
+        };
+      }
+    </script>
+    <style>
+      :root {
+        --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+        --font-mono: 'JetBrains Mono', monospace;
+        --theme-bg: #eff6ff;
+        --theme-bg-subtle: #dbeafe;
+        --theme-primary: #2563eb;
+        --theme-primary-hover: #1d4ed8;
+        --theme-primary-light: #eff6ff;
+        --theme-border: #bfdbfe;
+        --theme-text-accent: #1d4ed8;
+      }
+      html, body {
+        margin: 0;
+        padding: 0;
+        font-family: var(--font-sans);
+        background-color: #eff6ff;
+        color: #0f172a;
+        -webkit-font-smoothing: antialiased;
+      }
+      #root {
+        min-height: 100vh;
+        background-color: #eff6ff;
+        color: #0f172a;
+      }
+      .font-mono-tabular {
+        font-family: var(--font-mono);
+        font-variant-numeric: tabular-nums;
+      }
+      .theme-bg-primary {
+        background-color: #2563eb !important;
+        color: #ffffff !important;
+      }
+      .theme-bg-primary:hover {
+        background-color: #1d4ed8 !important;
+      }
+      .theme-bg-light {
+        background-color: #eff6ff !important;
+      }
+      .theme-bg-subtle {
+        background-color: #dbeafe !important;
+      }
+      .theme-text-accent {
+        color: #1d4ed8 !important;
+      }
+      .theme-border {
+        border-color: #bfdbfe !important;
+      }
+    </style>
+    <link rel="stylesheet" href="./assets/near500.css" />
+    <script type="module" src="/src/main.tsx"></script>
+  </head>
+  <body class="bg-blue-50 text-slate-900 antialiased selection:bg-blue-600 selection:text-white">
+    <div id="root"></div>
+    <script>
+      (function () {
+        var isViteDev = !!document.querySelector('script[src*="@vite/client"]');
+        var isBuiltDist = !!document.querySelector('script[src*="assets/near500.js"]');
+        if (!isViteDev && !isBuiltDist) {
+          var v = 'n500_blue_' + Date.now();
+          var css = document.createElement('link');
+          css.rel = 'stylesheet';
+          css.href = './assets/near500.css?v=' + v;
+          document.head.appendChild(css);
+
+          var script = document.createElement('script');
+          script.type = 'module';
+          script.src = './assets/near500.js?v=' + v;
+          document.body.appendChild(script);
+        }
+      })();
+    </script>
+  </body>
+</html>

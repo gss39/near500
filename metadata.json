@@ -1,0 +1,6 @@
+{
+  "name": "Near500 — 500m Proximity Profile Discovery",
+  "description": "Discover and connect with people automatically as soon as they enter within a 500-meter radius around you.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
