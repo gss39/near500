@@ -27,8 +27,8 @@ export interface LiveUserRecord {
     | 'dev'
     | 'tara';
   isDiscoverableUnder500m: boolean;
-  lat: number;
-  lng: number;
+  lat: number | null;
+  lng: number | null;
   accuracy?: number;
   gpsUpdatedAt: number;
   lastSeenAt: number;
@@ -222,41 +222,30 @@ async function startServer() {
       gpsUpdatedAt,
     } = req.body;
 
-    if (!id || typeof lat !== 'number' || typeof lng !== 'number') {
-      res.status(400).json({ error: 'Valid user id, lat, and lng are required.' });
+    if (!id) {
+      res.status(400).json({ error: 'Valid user id is required.' });
       return;
     }
 
     const existing = store.users[id];
-    const incomingGpsTs = typeof gpsUpdatedAt === 'number' ? gpsUpdatedAt : Date.now();
-    const incomingAcc =
-      typeof accuracy === 'number' && accuracy > 0 ? Math.round(accuracy) : 35;
-
-    // Never overwrite a newer or much sharper GPS reading with a coarse cell-tower jump
-    const isCoarseDowngrade =
-      existing &&
-      typeof existing.accuracy === 'number' &&
-      existing.accuracy <= 65 &&
-      Date.now() - existing.gpsUpdatedAt < 180000 &&
-      incomingAcc > 85 &&
-      incomingAcc > existing.accuracy * 1.6;
-
-    const useIncomingCoords =
-      !existing ||
-      !existing.gpsUpdatedAt ||
-      (incomingGpsTs >= existing.gpsUpdatedAt - 1000 && !isCoarseDowngrade);
-
-    const finalLat = useIncomingCoords ? Number(lat) : existing.lat;
-    const finalLng = useIncomingCoords ? Number(lng) : existing.lng;
-    const finalAcc = useIncomingCoords ? incomingAcc : existing.accuracy;
-    const finalGpsTs = useIncomingCoords ? incomingGpsTs : existing.gpsUpdatedAt;
+    const hasIncomingCoords = typeof lat === 'number' && typeof lng === 'number';
+    const finalLat = hasIncomingCoords ? Number(lat) : existing?.lat ?? null;
+    const finalLng = hasIncomingCoords ? Number(lng) : existing?.lng ?? null;
+    const finalAcc =
+      typeof accuracy === 'number' && accuracy > 0
+        ? Math.round(accuracy)
+        : existing?.accuracy;
+    const finalGpsTs =
+      typeof gpsUpdatedAt === 'number'
+        ? gpsUpdatedAt
+        : existing?.gpsUpdatedAt ?? Date.now();
 
     const updatedUser: LiveUserRecord = {
       id: String(id),
       name: String(name || 'Anonymous User').slice(0, 60),
       role: String(role || 'Member').slice(0, 80),
       bio: String(bio || '').slice(0, 240),
-      locationSpot: String(locationSpot || 'Live GPS').slice(0, 80),
+      locationSpot: String(locationSpot || 'Online').slice(0, 80),
       statusTag: statusTag ? String(statusTag).slice(0, 50) : undefined,
       photoUrl: photoUrl ? String(photoUrl) : undefined,
       avatarPreset: avatarPreset || 'rohan',
@@ -277,9 +266,7 @@ async function startServer() {
       existing.statusTag !== updatedUser.statusTag ||
       existing.photoUrl !== updatedUser.photoUrl ||
       existing.locationSpot !== updatedUser.locationSpot ||
-      existing.isDiscoverableUnder500m !== updatedUser.isDiscoverableUnder500m ||
-      existing.lat !== updatedUser.lat ||
-      existing.lng !== updatedUser.lng;
+      existing.isDiscoverableUnder500m !== updatedUser.isDiscoverableUnder500m;
 
     store.users[id] = updatedUser;
     saveStore(store);
@@ -288,18 +275,32 @@ async function startServer() {
       broadcastUpdate();
     }
 
-    const nearbyUsersUnder500m = Object.values(store.users)
+    const activeGlobalUsers = Object.values(store.users)
       .filter((u) => u.id !== id && u.isDiscoverableUnder500m)
       .map((u) => {
-        const distanceMeters = getDistanceMeters(
-          finalLat,
-          finalLng,
-          u.lat,
-          u.lng,
-          finalAcc,
-          u.accuracy
-        );
-        const compassDir = getCompassDir(finalLat, finalLng, u.lat, u.lng);
+        const hasBothCoords =
+          typeof finalLat === 'number' &&
+          typeof finalLng === 'number' &&
+          typeof u.lat === 'number' &&
+          typeof u.lng === 'number';
+        const distanceMeters = hasBothCoords
+          ? getDistanceMeters(
+              finalLat as number,
+              finalLng as number,
+              u.lat as number,
+              u.lng as number,
+              finalAcc,
+              u.accuracy
+            )
+          : 0;
+        const compassDir = hasBothCoords
+          ? getCompassDir(
+              finalLat as number,
+              finalLng as number,
+              u.lat as number,
+              u.lng as number
+            )
+          : undefined;
         return {
           id: u.id,
           name: u.name,
@@ -309,8 +310,8 @@ async function startServer() {
           statusTag: u.statusTag,
           photoUrl: u.photoUrl,
           avatarPreset: u.avatarPreset,
-          lat: u.lat,
-          lng: u.lng,
+          lat: u.lat ?? undefined,
+          lng: u.lng ?? undefined,
           accuracy: u.accuracy,
           gpsUpdatedAt: u.gpsUpdatedAt,
           distanceMeters,
@@ -320,8 +321,7 @@ async function startServer() {
           wavedAtMe: updatedUser.wavedBy.includes(u.id),
         };
       })
-      .filter((u) => u.distanceMeters <= 550)
-      .sort((a, b) => a.distanceMeters - b.distanceMeters);
+      .sort((a, b) => b.lastSeenAt - a.lastSeenAt);
 
     const userMessages = store.messages.filter(
       (m) => m.fromUserId === id || m.toUserId === id
@@ -339,7 +339,7 @@ async function startServer() {
 
     res.json({
       me: updatedUser,
-      nearbyUsers: nearbyUsersUnder500m,
+      nearbyUsers: activeGlobalUsers,
       messages: userMessages,
       typingFromIds,
     });

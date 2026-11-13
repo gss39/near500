@@ -3,8 +3,6 @@ import {
   Search,
   X,
   MapPin,
-  Navigation,
-  RefreshCw,
   Share2,
   QrCode,
   Copy,
@@ -37,12 +35,7 @@ import {
 import {
   LiveProximityRelay,
   RelayPacket,
-  getHaversineDistanceMeters,
-  getProximityDistanceMeters,
-  getCompassDirection,
 } from './utils/liveRelay';
-
-type RangeFilter = 'all' | '100' | '250';
 
 interface RelayPeerState {
   profile: CurrentUserProfile;
@@ -96,15 +89,9 @@ export default function App() {
   const [copiedLink, setCopiedLink] = useState(false);
 
   const [searchQuery, setSearchQuery] = useState('');
-  const [rangeFilter, setRangeFilter] = useState<RangeFilter>('all');
 
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [isMyProfileOpen, setIsMyProfileOpen] = useState(false);
-
-  const [gpsState, setGpsState] = useState<'locating' | 'live' | 'error'>(() =>
-    currentUser.lat !== null && currentUser.lng !== null ? 'live' : 'locating'
-  );
-  const [gpsErrorMsg, setGpsErrorMsg] = useState<string | null>(null);
 
   const currentUserRef = useRef(currentUser);
   useEffect(() => {
@@ -114,24 +101,6 @@ export default function App() {
   const relayRef = useRef<LiveProximityRelay | null>(null);
   const lastReplyTimeRef = useRef<Record<string, number>>({});
   const knownMessageIdsRef = useRef<Set<string>>(new Set());
-  const watchIdRef = useRef<number | null>(null);
-  const visiblePeerIdsRef = useRef<Set<string>>(new Set());
-  const hasBroadcastedInitialFixRef = useRef<boolean>(false);
-  const lastGpsFixRef = useRef<{
-    lat: number;
-    lng: number;
-    accuracy: number;
-    timestamp: number;
-  } | null>(
-    currentUser.lat !== null && currentUser.lng !== null
-      ? {
-          lat: currentUser.lat,
-          lng: currentUser.lng,
-          accuracy: currentUser.accuracy || 35,
-          timestamp: currentUser.gpsUpdatedAt || Date.now(),
-        }
-      : null
-  );
 
   // Persist active relayPeers in sessionStorage so brief refreshes never blank out the radar
   useEffect(() => {
@@ -186,11 +155,10 @@ export default function App() {
     []
   );
 
-  // Sync current user's live location & profile with server AND global live relay
+  // Sync current user's live profile with server AND global live relay (no GPS/distance limit)
   const syncWithServer = useCallback(
     async (profileToSync?: CurrentUserProfile, requestPeersReply = false) => {
       const user = profileToSync || currentUserRef.current;
-      if (user.lat === null || user.lng === null) return;
 
       relayRef.current?.broadcastPresence(user, requestPeersReply, requestPeersReply);
       if (requestPeersReply) {
@@ -269,11 +237,7 @@ export default function App() {
             const isNewPeer = !existing;
             const now = Date.now();
 
-            if (
-              (isNewPeer || packet.replyRequested) &&
-              me.lat !== null &&
-              me.lng !== null
-            ) {
+            if (isNewPeer || packet.replyRequested) {
               if (
                 !lastReplyTimeRef.current[peer.id] ||
                 now - lastReplyTimeRef.current[peer.id] > 3000
@@ -288,56 +252,13 @@ export default function App() {
               }
             }
 
-            // Protect against out-of-order packets AND coarse cell-tower jumps from peer
-            const incomingGpsTs = peer.gpsUpdatedAt || packet.timestamp || now;
-            const existingGpsTs = existing?.profile.gpsUpdatedAt || 0;
-            const incomingAcc =
-              typeof peer.accuracy === 'number' && peer.accuracy > 0
-                ? peer.accuracy
-                : 35;
-            const existingAcc =
-              typeof existing?.profile.accuracy === 'number' &&
-              existing.profile.accuracy > 0
-                ? existing.profile.accuracy
-                : 999;
-
-            const isCoarsePeerDowngrade =
-              existing &&
-              existing.profile.lat !== null &&
-              existing.profile.lng !== null &&
-              now - existingGpsTs < 180000 &&
-              existingAcc <= 70 &&
-              incomingAcc > 85 &&
-              incomingAcc > existingAcc * 1.5;
-
-            const useIncomingCoords =
-              !existing ||
-              existing.profile.lat === null ||
-              existing.profile.lng === null ||
-              (incomingGpsTs >= existingGpsTs - 1500 && !isCoarsePeerDowngrade);
-
-            const mergedProfile: CurrentUserProfile = useIncomingCoords
-              ? { ...peer, gpsUpdatedAt: incomingGpsTs }
-              : {
-                  ...peer,
-                  lat: existing.profile.lat,
-                  lng: existing.profile.lng,
-                  accuracy: existing.profile.accuracy,
-                  gpsUpdatedAt: existingGpsTs,
-                };
-
             return {
               ...prev,
-              [peer.id]: { profile: mergedProfile, lastSeenAt: now },
+              [peer.id]: { profile: peer, lastSeenAt: now },
             };
           });
         } else if (packet.type === 'presence_request') {
-          if (
-            packet.fromUserId &&
-            packet.fromUserId !== me.id &&
-            me.lat !== null &&
-            me.lng !== null
-          ) {
+          if (packet.fromUserId && packet.fromUserId !== me.id) {
             const now = Date.now();
             if (
               !lastReplyTimeRef.current[packet.fromUserId] ||
@@ -422,12 +343,7 @@ export default function App() {
         }
       },
       () => {
-        if (
-          currentUserRef.current.lat !== null &&
-          currentUserRef.current.lng !== null
-        ) {
-          relayRef.current?.broadcastPresence(currentUserRef.current, true, true);
-        }
+        relayRef.current?.broadcastPresence(currentUserRef.current, true, true);
       }
     );
 
@@ -468,127 +384,49 @@ export default function App() {
     return () => clearInterval(timer);
   }, []);
 
-  // Merge live server users + WebSocket relay peers + starter community peers so the radar is NEVER empty
+  // Merge all global live server users + WebSocket relay peers + starter community peers (no distance limits)
   const liveUsers = useMemo(() => {
     const blockedSet = new Set(blockedUsers.map((b) => b.id));
     const combined = new Map<string, UserProfile>();
-    const myLat = currentUser.lat;
-    const myLng = currentUser.lng;
-    const myAcc = currentUser.accuracy;
 
     for (const u of serverUsers) {
       if (blockedSet.has(u.id)) continue;
-      const wasVisible = visiblePeerIdsRef.current.has(u.id);
-      const maxAllowedDist = wasVisible ? 560 : 500;
-
-      const rawCalculatedDist =
-        myLat !== null &&
-        myLng !== null &&
-        typeof u.lat === 'number' &&
-        typeof u.lng === 'number'
-          ? getProximityDistanceMeters(
-              myLat,
-              myLng,
-              u.lat,
-              u.lng,
-              myAcc,
-              u.accuracy
-            )
-          : u.distanceMeters;
-
-      const compassDir =
-        myLat !== null &&
-        myLng !== null &&
-        typeof u.lat === 'number' &&
-        typeof u.lng === 'number'
-          ? getCompassDirection(myLat, myLng, u.lat, u.lng)
-          : u.compassDir;
-
-      if (rawCalculatedDist <= maxAllowedDist) {
-        combined.set(u.id, {
-          ...u,
-          distanceMeters: Math.min(500, rawCalculatedDist),
-          compassDir,
-          waved: Boolean(u.waved || wavedByMe[u.id]),
-          wavedAtMe: Boolean(u.wavedAtMe || wavedAtMe[u.id]),
-        });
-      }
+      combined.set(u.id, {
+        ...u,
+        waved: Boolean(u.waved || wavedByMe[u.id]),
+        wavedAtMe: Boolean(u.wavedAtMe || wavedAtMe[u.id]),
+      });
     }
 
-    if (myLat !== null && myLng !== null) {
-      for (const [peerId, entry] of Object.entries(relayPeers)) {
-        if (peerId === currentUser.id) continue;
-        if (blockedSet.has(peerId)) continue;
-        const p = entry.profile;
-        if (!p.isDiscoverableUnder500m || p.lat === null || p.lng === null) {
-          combined.delete(peerId);
-          continue;
-        }
-
-        const existing = combined.get(peerId);
-        const relayGpsTs = p.gpsUpdatedAt || entry.lastSeenAt || 0;
-        const serverGpsTs = existing?.gpsUpdatedAt || 0;
-        const relayAcc =
-          typeof p.accuracy === 'number' && p.accuracy > 0 ? p.accuracy : 35;
-        const serverAcc =
-          typeof existing?.accuracy === 'number' && existing.accuracy > 0
-            ? existing.accuracy
-            : 999;
-
-        const bothRecent = Math.abs(relayGpsTs - serverGpsTs) < 60000;
-        const useRelayCoords =
-          !existing ||
-          typeof existing.lat !== 'number' ||
-          typeof existing.lng !== 'number' ||
-          (bothRecent ? relayAcc <= serverAcc * 1.2 : relayGpsTs >= serverGpsTs);
-
-        const peerLat = useRelayCoords ? p.lat : (existing!.lat as number);
-        const peerLng = useRelayCoords ? p.lng : (existing!.lng as number);
-        const peerAcc = useRelayCoords ? p.accuracy : existing?.accuracy;
-
-        const wasVisible = visiblePeerIdsRef.current.has(peerId);
-        const maxAllowedDist = wasVisible ? 560 : 500;
-
-        const dist = getProximityDistanceMeters(
-          myLat,
-          myLng,
-          peerLat,
-          peerLng,
-          myAcc,
-          peerAcc
-        );
-
-        if (dist > maxAllowedDist) {
-          combined.delete(peerId);
-          continue;
-        }
-
-        const compassDir = getCompassDirection(myLat, myLng, peerLat, peerLng);
-        const mergedLastSeen = Math.max(
-          entry.lastSeenAt || 0,
-          existing?.lastSeenAt || 0
-        );
-
-        combined.set(peerId, {
-          id: p.id,
-          name: p.name,
-          role: p.role,
-          bio: p.bio,
-          locationSpot: p.locationSpot,
-          statusTag: p.statusTag,
-          photoUrl: p.photoUrl || existing?.photoUrl,
-          avatarPreset: p.avatarPreset,
-          lat: peerLat,
-          lng: peerLng,
-          accuracy: peerAcc,
-          gpsUpdatedAt: Math.max(relayGpsTs, serverGpsTs),
-          distanceMeters: Math.min(500, dist),
-          compassDir,
-          lastSeenAt: mergedLastSeen,
-          waved: Boolean(existing?.waved || wavedByMe[peerId]),
-          wavedAtMe: Boolean(existing?.wavedAtMe || wavedAtMe[peerId]),
-        });
+    for (const [peerId, entry] of Object.entries(relayPeers)) {
+      if (peerId === currentUser.id) continue;
+      if (blockedSet.has(peerId)) continue;
+      const p = entry.profile;
+      if (!p.isDiscoverableUnder500m) {
+        combined.delete(peerId);
+        continue;
       }
+
+      const existing = combined.get(peerId);
+      const mergedLastSeen = Math.max(
+        entry.lastSeenAt || 0,
+        existing?.lastSeenAt || 0
+      );
+
+      combined.set(peerId, {
+        id: p.id,
+        name: p.name,
+        role: p.role,
+        bio: p.bio,
+        locationSpot: p.locationSpot,
+        statusTag: p.statusTag,
+        photoUrl: p.photoUrl || existing?.photoUrl,
+        avatarPreset: p.avatarPreset,
+        distanceMeters: 0,
+        lastSeenAt: mergedLastSeen,
+        waved: Boolean(existing?.waved || wavedByMe[peerId]),
+        wavedAtMe: Boolean(existing?.wavedAtMe || wavedAtMe[peerId]),
+      });
     }
 
     // Always include active Starter Community Peers unless blocked, so first-time users never see an empty screen
@@ -604,171 +442,29 @@ export default function App() {
       }
     }
 
-    // Sort real live devices first (or by distanceMeters ascending)
-    const sorted = Array.from(combined.values()).sort((a, b) => {
+    // Sort real live devices first (most recently active on top), then starter community peers
+    return Array.from(combined.values()).sort((a, b) => {
       const aStarter = isCommunityStarterPeer(a.id) ? 1 : 0;
       const bStarter = isCommunityStarterPeer(b.id) ? 1 : 0;
       if (aStarter !== bStarter) return aStarter - bStarter;
-      return a.distanceMeters - b.distanceMeters;
+      return (b.lastSeenAt || 0) - (a.lastSeenAt || 0);
     });
-    visiblePeerIdsRef.current = new Set(sorted.map((u) => u.id));
-    return sorted;
   }, [
     serverUsers,
     relayPeers,
     currentUser.id,
-    currentUser.lat,
-    currentUser.lng,
-    currentUser.accuracy,
     wavedByMe,
     wavedAtMe,
     blockedUsers,
   ]);
 
-  // Apply new GPS coordinates with accuracy-lock filtering & smoothing
-  const applyCoords = useCallback(
-    (latitude: number, longitude: number, accuracy?: number, fixTimestamp?: number) => {
-      const now = Date.now();
-      const acc = typeof accuracy === 'number' && accuracy > 0 ? accuracy : 35;
-      const fixTs = fixTimestamp || now;
-      const prevFix = lastGpsFixRef.current;
-
-      let nextLat = latitude;
-      let nextLng = longitude;
-      let nextAcc = acc;
-
-      if (prevFix) {
-        if (fixTs < prevFix.timestamp - 1000) {
-          return;
-        }
-        if (
-          now - prevFix.timestamp < 180000 &&
-          prevFix.accuracy <= 70 &&
-          acc > 80 &&
-          acc > prevFix.accuracy * 1.5
-        ) {
-          return;
-        }
-
-        const stepDist = getHaversineDistanceMeters(
-          prevFix.lat,
-          prevFix.lng,
-          latitude,
-          longitude
-        );
-        if (
-          stepDist > 0 &&
-          stepDist <= prevFix.accuracy + acc &&
-          acc >= prevFix.accuracy * 0.8
-        ) {
-          const weightNew = prevFix.accuracy / (prevFix.accuracy + acc);
-          nextLat = prevFix.lat + (latitude - prevFix.lat) * weightNew;
-          nextLng = prevFix.lng + (longitude - prevFix.lng) * weightNew;
-          nextAcc = Math.min(acc, Math.round((prevFix.accuracy + acc) / 2));
-        }
-      }
-
-      lastGpsFixRef.current = {
-        lat: nextLat,
-        lng: nextLng,
-        accuracy: nextAcc,
-        timestamp: fixTs,
-      };
-
-      const isInitialFix = !hasBroadcastedInitialFixRef.current;
-      hasBroadcastedInitialFixRef.current = true;
-
-      setCurrentUser((prev) => {
-        const updated: CurrentUserProfile = {
-          ...prev,
-          lat: nextLat,
-          lng: nextLng,
-          accuracy: Math.round(nextAcc),
-          gpsUpdatedAt: now,
-        };
-        saveCurrentUserToStorage(updated);
-        syncWithServer(updated, isInitialFix);
-        return updated;
-      });
-      setGpsState('live');
-      setGpsErrorMsg(null);
-    },
-    [syncWithServer]
-  );
-
-  const requestLiveLocation = useCallback(() => {
-    if (currentUserRef.current.lat !== null && currentUserRef.current.lng !== null) {
-      syncWithServer(currentUserRef.current, true);
-      setGpsState('live');
-    } else {
-      setGpsState('locating');
-    }
-    setGpsErrorMsg(null);
-
-    if (!('geolocation' in navigator)) {
-      setGpsState('error');
-      setGpsErrorMsg('GPS is not supported on this browser.');
-      return;
-    }
-
-    const handleSuccess = (pos: GeolocationPosition) => {
-      applyCoords(
-        pos.coords.latitude,
-        pos.coords.longitude,
-        pos.coords.accuracy,
-        pos.timestamp
-      );
-    };
-
-    const handleError = (err: GeolocationPositionError) => {
-      if (err.code === 1 || currentUserRef.current.lat === null) {
-        setGpsState('error');
-        setGpsErrorMsg(
-          'Location permission is off. Turn on GPS to connect with real phones around you within 500m.'
-        );
-      }
-    };
-
-    navigator.geolocation.getCurrentPosition(handleSuccess, handleError, {
-      enableHighAccuracy: true,
-      timeout: 12000,
-      maximumAge: 0,
-    });
-
-    if (watchIdRef.current === null) {
-      watchIdRef.current = navigator.geolocation.watchPosition(
-        handleSuccess,
-        handleError,
-        {
-          enableHighAccuracy: true,
-          maximumAge: 0,
-          timeout: 15000,
-        }
-      );
-    }
-  }, [applyCoords, syncWithServer]);
-
+  // Announce user live immediately on load & whenever tab regains focus
   useEffect(() => {
-    requestLiveLocation();
-
-    let permStatus: PermissionStatus | null = null;
-    if ('permissions' in navigator && navigator.permissions?.query) {
-      navigator.permissions
-        .query({ name: 'geolocation' as PermissionName })
-        .then((status) => {
-          permStatus = status;
-          status.onchange = () => {
-            if (status.state === 'granted') {
-              requestLiveLocation();
-            }
-          };
-        })
-        .catch(() => {});
-    }
+    syncWithServer(currentUserRef.current, true);
 
     const handleVisibilityOrFocus = () => {
       if (document.visibilityState === 'visible') {
-        requestLiveLocation();
+        syncWithServer(currentUserRef.current, true);
       }
     };
 
@@ -776,15 +472,10 @@ export default function App() {
     document.addEventListener('visibilitychange', handleVisibilityOrFocus);
 
     return () => {
-      if (watchIdRef.current !== null) {
-        navigator.geolocation.clearWatch(watchIdRef.current);
-        watchIdRef.current = null;
-      }
-      if (permStatus) permStatus.onchange = null;
       window.removeEventListener('focus', handleVisibilityOrFocus);
       document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
     };
-  }, [requestLiveLocation]);
+  }, [syncWithServer]);
 
   useEffect(() => {
     let evtSource: EventSource | null = null;
@@ -1049,7 +740,7 @@ export default function App() {
   };
 
   const whatsAppInviteHref = `https://wa.me/?text=${encodeURIComponent(
-    `🔥 Mere 500 meter radar pe join karo! Bina phone number ke aas-paas ke logo se live chat karo: ${appShareUrl}`
+    `💬 Join me on live chat! Connect and message instantly without sharing phone numbers: ${appShareUrl}`
   )}`;
 
   // Mark messages as read & broadcast Seen (`✓✓`) whenever a chat modal is open
@@ -1112,15 +803,11 @@ export default function App() {
     return unread;
   }, [messages, currentUser.id, readCountsByPeer, selectedUserId]);
 
-  // Filter live users strictly <= 500m
+  // Filter all global live users by search query (no distance restrictions)
   const filteredUsers = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
 
     return liveUsers.filter((u) => {
-      if (u.distanceMeters > 500) return false;
-      if (rangeFilter === '100' && u.distanceMeters > 100) return false;
-      if (rangeFilter === '250' && u.distanceMeters > 250) return false;
-
       if (!q) return true;
       return (
         u.name.toLowerCase().includes(q) ||
@@ -1130,7 +817,7 @@ export default function App() {
         u.bio.toLowerCase().includes(q)
       );
     });
-  }, [liveUsers, searchQuery, rangeFilter]);
+  }, [liveUsers, searchQuery]);
 
   const selectedUser = useMemo(
     () => liveUsers.find((u) => u.id === selectedUserId) || null,
@@ -1157,7 +844,6 @@ export default function App() {
             onClick={(e) => {
               e.preventDefault();
               setSearchQuery('');
-              setRangeFilter('all');
             }}
             className="flex items-center gap-2 text-base sm:text-lg font-bold tracking-tight text-slate-900 whitespace-nowrap shrink-0"
           >
@@ -1165,23 +851,23 @@ export default function App() {
               N
             </span>
             <div className="flex flex-col">
-              <span className="leading-none">Near500</span>
+              <span className="leading-none">NearChat</span>
               <span className="text-[10px] font-semibold text-emerald-600 flex items-center gap-1 mt-0.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
-                <span>{liveUsers.length} active in 500m</span>
+                <span>{liveUsers.length} online now</span>
               </span>
             </div>
           </a>
 
           <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
-            {/* Invite Nearby Button */}
+            {/* Invite Button */}
             <button
               type="button"
               onClick={() => setIsInviteOpen(true)}
               className="min-h-[38px] sm:min-h-[40px] px-2.5 sm:px-3.5 py-1.5 rounded-full bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer shadow-sm"
             >
               <QrCode className="w-3.5 h-3.5 shrink-0" />
-              <span className="hidden sm:inline">Invite Nearby</span>
+              <span className="hidden sm:inline">Invite to Chat</span>
               <span className="sm:hidden">Invite</span>
             </button>
 
@@ -1199,7 +885,7 @@ export default function App() {
                 photoUrl={currentUser.photoUrl}
                 size="sm"
                 className="w-8 h-8 sm:w-7 sm:h-7 rounded-full shrink-0"
-                showOnlineDot={gpsState === 'live' && currentUser.isDiscoverableUnder500m}
+                showOnlineDot={currentUser.isDiscoverableUnder500m}
                 isOnlineNow={true}
               />
               <span className="hidden sm:inline text-sm font-semibold text-slate-800 max-w-[140px] truncate">
@@ -1212,8 +898,8 @@ export default function App() {
 
       {/* MAIN CONTENT */}
       <main className="flex-1 w-full max-w-4xl mx-auto px-3 sm:px-6 py-3.5 sm:py-5 space-y-4">
-        {/* 2. AFTER HEADER: Search Bar + Range & GPS Controls */}
-        <section aria-label="Search live users under 500m" className="space-y-2.5">
+        {/* 2. AFTER HEADER: Search Bar */}
+        <section aria-label="Search live users">
           <div className="relative">
             <Search
               className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600 absolute left-3.5 sm:left-4 top-1/2 -translate-y-1/2 pointer-events-none"
@@ -1223,8 +909,8 @@ export default function App() {
               type="search"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search live people, status, or spot under 500m..."
-              aria-label="Search live user under 500m"
+              placeholder="Search live people, role, status, or city..."
+              aria-label="Search live user"
               className="w-full min-h-[46px] sm:min-h-[48px] pl-10 sm:pl-12 pr-10 py-2 bg-white border border-blue-200 rounded-2xl text-base sm:text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-600 shadow-sm transition-all"
             />
             {searchQuery && (
@@ -1238,110 +924,24 @@ export default function App() {
               </button>
             )}
           </div>
-
-          {/* Range Filters + GPS Status & Refresh Bar */}
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            {/* Distance Range Filters */}
-            <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
-              <button
-                type="button"
-                onClick={() => setRangeFilter('all')}
-                className={`min-h-[34px] px-2.5 sm:px-3 py-1 rounded-xl text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                  rangeFilter === 'all'
-                    ? 'bg-blue-600 text-white shadow-2xs'
-                    : 'bg-white text-slate-600 border border-blue-100 hover:text-slate-900'
-                }`}
-              >
-                All under 500m
-              </button>
-              <button
-                type="button"
-                onClick={() => setRangeFilter('250')}
-                className={`min-h-[34px] px-2.5 sm:px-3 py-1 rounded-xl text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                  rangeFilter === '250'
-                    ? 'bg-blue-600 text-white shadow-2xs'
-                    : 'bg-white text-slate-600 border border-blue-100 hover:text-slate-900'
-                }`}
-              >
-                Under 250m
-              </button>
-              <button
-                type="button"
-                onClick={() => setRangeFilter('100')}
-                className={`min-h-[34px] px-2.5 sm:px-3 py-1 rounded-xl text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                  rangeFilter === '100'
-                    ? 'bg-blue-600 text-white shadow-2xs'
-                    : 'bg-white text-slate-600 border border-blue-100 hover:text-slate-900'
-                }`}
-              >
-                Under 100m
-              </button>
-            </div>
-
-            {/* GPS Status + Refresh */}
-            <div className="flex items-center gap-1.5 shrink-0 ml-auto">
-              <button
-                type="button"
-                onClick={requestLiveLocation}
-                className="min-h-[34px] px-2.5 sm:px-3 py-1 rounded-xl bg-white border border-blue-200 text-[11px] sm:text-xs font-semibold text-blue-700 hover:bg-blue-50 transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
-              >
-                <Navigation className="w-3.5 h-3.5 shrink-0" />
-                <span className="font-mono-tabular">
-                  {gpsState === 'locating'
-                    ? 'Locking GPS...'
-                    : gpsState === 'live' && currentUser.lat !== null
-                    ? `GPS Live${currentUser.accuracy ? ` (±${currentUser.accuracy}m)` : ''}`
-                    : 'Turn On GPS'}
-                </span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => syncWithServer(currentUser, true)}
-                aria-label="Refresh radar"
-                title="Refresh radar"
-                className="min-h-[34px] px-2.5 sm:px-3 py-1 rounded-xl bg-white border border-blue-200 text-xs font-semibold text-blue-700 hover:bg-blue-50 transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
-              >
-                <RefreshCw className="w-3.5 h-3.5 shrink-0" />
-                <span className="hidden sm:inline">Refresh</span>
-              </button>
-            </div>
-          </div>
         </section>
 
-        {/* GPS Error Alert if Location Blocked */}
-        {gpsErrorMsg && (
-          <div className="p-3 sm:p-3.5 rounded-2xl bg-amber-50 border border-amber-200 flex flex-col xs:flex-row items-start xs:items-center justify-between gap-2.5">
-            <p className="text-xs text-amber-900 leading-relaxed">{gpsErrorMsg}</p>
-            <button
-              type="button"
-              onClick={requestLiveLocation}
-              className="w-full xs:w-auto min-h-[36px] px-3.5 py-1.5 rounded-xl bg-amber-900 text-white text-xs font-semibold shrink-0 cursor-pointer"
-            >
-              Enable GPS
-            </button>
-          </div>
-        )}
-
-        {/* 3. PEOPLE RADAR CARDS */}
-        <section aria-label="Live user profiles within 500 meters" className="space-y-3.5">
+        {/* 3. LIVE CHAT USER CARDS */}
+        <section aria-label="Live user profiles online" className="space-y-3.5">
           {filteredUsers.length === 0 ? (
             <div className="py-10 px-4 text-center bg-white border border-blue-200 rounded-3xl shadow-sm">
               <p className="text-sm font-bold text-slate-800">
                 No match found for "{searchQuery}"
               </p>
               <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
-                Clear your search filter or reset range to see all active people within 500m.
+                Clear your search filter to see all users currently online.
               </p>
               <button
                 type="button"
-                onClick={() => {
-                  setSearchQuery('');
-                  setRangeFilter('all');
-                }}
+                onClick={() => setSearchQuery('')}
                 className="mt-3.5 min-h-[40px] px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-colors cursor-pointer"
               >
-                Show All Nearby Users
+                Show All Live Users
               </button>
             </div>
           ) : (
@@ -1412,22 +1012,14 @@ export default function App() {
                             person.role
                           )}
                         </p>
-                        <p className="text-[11px] sm:text-xs text-slate-500 mt-1 flex items-center gap-1 truncate font-mono-tabular">
+                        <p className="text-[11px] sm:text-xs text-slate-500 mt-1 flex items-center gap-1 truncate">
                           <MapPin className="w-3 h-3 text-blue-600 shrink-0" />
-                          <span className="font-bold text-blue-700 shrink-0">
-                            {person.distanceMeters}m
-                          </span>
-                          {person.compassDir && (
-                            <>
-                              <span aria-hidden="true">·</span>
-                              <span className="font-semibold text-slate-700 shrink-0">
-                                {person.compassDir}
-                              </span>
-                            </>
-                          )}
-                          <span aria-hidden="true">·</span>
                           <span className="truncate font-sans">
-                            {person.wavedAtMe ? 'Said Hi 👋' : person.locationSpot}
+                            {person.wavedAtMe
+                              ? `Said Hi 👋 · ${person.locationSpot}`
+                              : person.bio
+                              ? `${person.locationSpot} · ${person.bio}`
+                              : person.locationSpot}
                           </span>
                         </p>
                       </div>
@@ -1453,15 +1045,15 @@ export default function App() {
             </div>
           )}
 
-          {/* Quick Invite Banner at Bottom of Radar */}
+          {/* Quick Invite Banner at Bottom */}
           <div className="p-3.5 sm:p-4 rounded-2xl bg-white border border-blue-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-sm">
             <div className="space-y-0.5">
               <p className="text-xs sm:text-sm font-bold text-slate-900 flex items-center gap-1.5">
                 <Sparkles className="w-4 h-4 text-blue-600 shrink-0" />
-                <span>Want your real friends around you on this radar?</span>
+                <span>Invite friends & colleagues to live chat</span>
               </p>
               <p className="text-xs text-slate-500 leading-relaxed">
-                Share the QR code or WhatsApp link with anyone sitting within 500m to see their live distance in meters.
+                Share the QR code or WhatsApp link with anyone to connect and chat live from anywhere without sharing phone numbers.
               </p>
             </div>
             <div className="grid grid-cols-2 sm:flex items-center gap-2 shrink-0 w-full sm:w-auto">
@@ -1487,7 +1079,7 @@ export default function App() {
         </section>
       </main>
 
-      {/* Invite Nearby QR & Share Modal */}
+      {/* Invite QR & Share Modal */}
       {isInviteOpen && (
         <div
           className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4"
@@ -1499,7 +1091,7 @@ export default function App() {
           >
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold uppercase tracking-wider text-blue-700">
-                500m Radar Invite
+                Live Chat Invite
               </span>
               <button
                 type="button"
@@ -1512,10 +1104,10 @@ export default function App() {
 
             <div className="space-y-1">
               <h2 className="text-base sm:text-lg font-bold text-slate-900">
-                Scan or Share Within 500m
+                Scan or Share Chat Link
               </h2>
               <p className="text-xs text-slate-500">
-                Ask friends around you to scan this QR code or open the link to appear live on your radar!
+                Share this QR code or open the link so friends and teammates can join and chat with you live from anywhere!
               </p>
             </div>
 
@@ -1524,7 +1116,7 @@ export default function App() {
                 src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(
                   appShareUrl
                 )}`}
-                alt="Near500 QR Code"
+                alt="Live Chat QR Code"
                 className="w-40 h-40 sm:w-44 sm:h-44 rounded-xl bg-white p-2 mx-auto"
               />
             </div>

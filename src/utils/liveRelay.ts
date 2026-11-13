@@ -202,16 +202,16 @@ function encodeRemainingLength(length: number): number[] {
   return bytes;
 }
 
-function encodeMqttString(str: string): Uint8Array {
+function encodeMqttString(str: string): Uint8Array<ArrayBuffer> {
   const utf8 = encoder.encode(str);
-  const res = new Uint8Array(2 + utf8.length);
+  const res = new Uint8Array(new ArrayBuffer(2 + utf8.length));
   res[0] = (utf8.length >> 8) & 0xff;
   res[1] = utf8.length & 0xff;
   res.set(utf8, 2);
   return res;
 }
 
-function buildConnectPacket(clientId: string): Uint8Array {
+function buildConnectPacket(clientId: string): Uint8Array<ArrayBuffer> {
   const protocolName = encodeMqttString('MQTT');
   const protocolLevel = 4; // MQTT 3.1.1
   const connectFlags = 0x02; // Clean session
@@ -222,7 +222,9 @@ function buildConnectPacket(clientId: string): Uint8Array {
     protocolName.length + 1 + 1 + 2 + clientIdBytes.length;
   const remLenBytes = encodeRemainingLength(varHeaderAndPayloadLen);
 
-  const packet = new Uint8Array(1 + remLenBytes.length + varHeaderAndPayloadLen);
+  const packet = new Uint8Array(
+    new ArrayBuffer(1 + remLenBytes.length + varHeaderAndPayloadLen)
+  );
   let offset = 0;
   packet[offset++] = 0x10; // CONNECT
   for (const b of remLenBytes) packet[offset++] = b;
@@ -236,11 +238,16 @@ function buildConnectPacket(clientId: string): Uint8Array {
   return packet;
 }
 
-function buildSubscribePacket(packetId: number, topic: string): Uint8Array {
+function buildSubscribePacket(
+  packetId: number,
+  topic: string
+): Uint8Array<ArrayBuffer> {
   const topicBytes = encodeMqttString(topic);
   const varLen = 2 + topicBytes.length + 1;
   const remLenBytes = encodeRemainingLength(varLen);
-  const packet = new Uint8Array(1 + remLenBytes.length + varLen);
+  const packet = new Uint8Array(
+    new ArrayBuffer(1 + remLenBytes.length + varLen)
+  );
   let offset = 0;
   packet[offset++] = 0x82; // SUBSCRIBE
   for (const b of remLenBytes) packet[offset++] = b;
@@ -252,12 +259,17 @@ function buildSubscribePacket(packetId: number, topic: string): Uint8Array {
   return packet;
 }
 
-function buildPublishPacket(topic: string, payloadStr: string): Uint8Array {
+function buildPublishPacket(
+  topic: string,
+  payloadStr: string
+): Uint8Array<ArrayBuffer> {
   const topicBytes = encodeMqttString(topic);
   const payloadBytes = encoder.encode(payloadStr);
   const varLen = topicBytes.length + payloadBytes.length;
   const remLenBytes = encodeRemainingLength(varLen);
-  const packet = new Uint8Array(1 + remLenBytes.length + varLen);
+  const packet = new Uint8Array(
+    new ArrayBuffer(1 + remLenBytes.length + varLen)
+  );
   let offset = 0;
   packet[offset++] = 0x30; // PUBLISH QoS 0
   for (const b of remLenBytes) packet[offset++] = b;
@@ -430,9 +442,10 @@ export class LiveProximityRelay {
     replyRequested = false,
     force = false
   ) {
-    if (profile.lat === null || profile.lng === null) return;
     const now = Date.now();
-    const sig = `${profile.name}|${profile.role}|${profile.bio}|${profile.locationSpot}|${profile.statusTag || ''}|${profile.avatarPreset}|${(profile.photoUrl || '').length}|${profile.isDiscoverableUnder500m}|${profile.lat.toFixed(5)}|${profile.lng.toFixed(5)}|${profile.accuracy || 0}`;
+    const latKey = profile.lat !== null ? profile.lat.toFixed(5) : 'global';
+    const lngKey = profile.lng !== null ? profile.lng.toFixed(5) : 'global';
+    const sig = `${profile.name}|${profile.role}|${profile.bio}|${profile.locationSpot}|${profile.statusTag || ''}|${profile.avatarPreset}|${(profile.photoUrl || '').length}|${profile.isDiscoverableUnder500m}|${latKey}|${lngKey}`;
     const changed = sig !== this.lastBroadcastSig;
 
     if (!force && !changed && !replyRequested && now - this.lastBroadcastTime < 2200) {

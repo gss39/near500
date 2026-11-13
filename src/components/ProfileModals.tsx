@@ -9,7 +9,7 @@ import {
   Image as ImageIcon,
   Mic,
   Square,
-  MapPin,
+  MessageCircle,
   Ban,
   ExternalLink,
 } from 'lucide-react';
@@ -190,12 +190,11 @@ export const UserDetailModal: React.FC<UserDetailModalProps> = ({
     }
   };
 
-  const handleShareCurrentSpot = () => {
-    if (currentUser.lat === null || currentUser.lng === null) return;
-    const mapUrl = `https://www.google.com/maps?q=${currentUser.lat},${currentUser.lng}`;
+  const handleSendQuickHello = () => {
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    onTypingChange(user.id, false);
     onSendMessage(user.id, {
-      text: `📍 Meet Halfway / My Spot: ${currentUser.locationSpot}`,
-      mapUrl,
+      text: `Hi ${user.name.split(' ')[0]}! 👋 Great to connect with you here.`,
     });
   };
 
@@ -224,7 +223,7 @@ export const UserDetailModal: React.FC<UserDetailModalProps> = ({
         onClick={(e) => e.stopPropagation()}
         className="bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-2xl border border-blue-200 overflow-hidden flex flex-col max-h-[92dvh] sm:max-h-[88vh] shadow-xl"
       >
-        {/* Top bar: Compass Direction + Online Status + Clear Chat + Block User + Close */}
+        {/* Top bar: Online Status + Location + Clear Chat + Block User + Close */}
         <div className="flex items-center justify-between px-4 sm:px-5 pt-3.5 pb-2 bg-blue-50 gap-2 shrink-0">
           <span className="text-xs font-semibold text-blue-700 font-mono-tabular truncate flex items-center gap-1.5">
             <span
@@ -233,8 +232,7 @@ export const UserDetailModal: React.FC<UserDetailModalProps> = ({
               }`}
             />
             <span className="truncate">
-              {user.distanceMeters}m away
-              {user.compassDir ? ` · ${user.compassDir}` : ''} · {presence.label}
+              {isPeerTyping ? 'Typing...' : `${presence.label} · ${user.locationSpot}`}
             </span>
           </span>
 
@@ -331,11 +329,11 @@ export const UserDetailModal: React.FC<UserDetailModalProps> = ({
 
             <button
               type="button"
-              onClick={handleShareCurrentSpot}
+              onClick={handleSendQuickHello}
               className="min-h-[38px] px-3.5 py-1.5 rounded-xl bg-white border border-blue-200 text-blue-700 hover:bg-blue-100/50 text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
             >
-              <MapPin className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-              <span>Share My Spot 📍</span>
+              <MessageCircle className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+              <span>Quick Hello</span>
             </button>
           </div>
         </div>
@@ -345,7 +343,7 @@ export const UserDetailModal: React.FC<UserDetailModalProps> = ({
           <div className="space-y-3 flex-1 min-h-[160px] max-h-[38dvh] sm:max-h-60 overflow-y-auto mb-3 pr-1">
             {messages.length === 0 && !isPeerTyping ? (
               <p className="text-xs text-slate-400 text-center py-6">
-                Send a message, photo, voice note, or live spot to {user.name.split(' ')[0]}
+                Send a message, photo, or voice note to {user.name.split(' ')[0]}
               </p>
             ) : (
               messages.map((msg) => {
@@ -788,10 +786,10 @@ export const CurrentUserModal: React.FC<CurrentUserModalProps> = ({
           <div className="p-3.5 rounded-xl bg-blue-50 border border-blue-200 flex items-center justify-between gap-3">
             <div>
               <p className="text-xs font-semibold text-slate-900">
-                Show my profile under 500m
+                Show my profile online
               </p>
               <p className="text-[11px] text-slate-600 mt-0.5">
-                Live users within 500 meters can see your profile
+                Live users on this site can see your profile and chat with you
               </p>
             </div>
             <button
@@ -843,7 +841,7 @@ export const CurrentUserModal: React.FC<CurrentUserModalProps> = ({
 
             <div>
               <label className="block text-xs font-medium text-slate-600 mb-1">
-                Place / Area Name
+                City / Location
               </label>
               <input
                 type="text"

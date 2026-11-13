@@ -91,60 +91,56 @@ const WALL_STORAGE_KEY = 'near500_local_wall_v2';
 export const STATUS_TAG_OPTIONS: string[] = [
   '🤝 Open to Chat',
   '☕ Coffee Break',
-  '📚 Studying / Working',
-  '🚨 Need Local Help',
+  '💻 Working / Tech',
+  '💼 Networking',
 ];
 
 export const REACTION_EMOJIS: string[] = ['❤️', '👍', '😂', '🔥'];
 
 /**
- * Starter Community Peers within 500m so a first-time visitor never sees an empty radar.
+ * Starter Community Peers so a first-time visitor never sees an empty chat directory.
  * They respond naturally to "Say Hi 👋" and chat messages so users can test & enjoy
- * every feature immediately even before inviting a friend.
+ * every feature immediately.
  */
 export const COMMUNITY_STARTER_PEERS: UserProfile[] = [
   {
     id: 'community-peer-aarav',
     name: 'Aarav Sharma',
-    role: 'B.Tech CS · 3rd Year',
-    bio: 'Working on side projects & down for quick chai or tech chats nearby.',
-    locationSpot: 'Central Library / Cafe Spot',
-    statusTag: '☕ Coffee Break',
-    distanceMeters: 42,
-    compassDir: '↗ NE',
+    role: 'Software Engineer',
+    bio: 'Building web products & open for quick tech discussions or casual chats.',
+    locationSpot: 'Bengaluru · Online',
+    statusTag: '💻 Working / Tech',
+    distanceMeters: 0,
     avatarPreset: 'aarav',
   },
   {
     id: 'community-peer-priya',
     name: 'Priya Verma',
-    role: 'UI/UX Designer',
-    bio: 'Sketching app wireframes nearby. Say hi if you are around this block!',
-    locationSpot: 'Reading Lounge · 1st Floor',
+    role: 'Product Designer',
+    bio: 'Designing interfaces & user flows. Say hi anytime if you want to connect!',
+    locationSpot: 'Mumbai · Online',
     statusTag: '🤝 Open to Chat',
-    distanceMeters: 118,
-    compassDir: '↖ NW',
+    distanceMeters: 0,
     avatarPreset: 'priya',
   },
   {
     id: 'community-peer-kabir',
     name: 'Kabir Patel',
     role: 'Startup Founder',
-    bio: 'Testing hyper-local networking within 500m. Open to brainstorm ideas.',
-    locationSpot: 'Main Gate Coffee Stall',
-    statusTag: '🤝 Open to Chat',
-    distanceMeters: 215,
-    compassDir: '↘ SE',
+    bio: 'Connecting with builders, creators, and professionals across the web.',
+    locationSpot: 'Delhi NCR · Online',
+    statusTag: '💼 Networking',
+    distanceMeters: 0,
     avatarPreset: 'kabir',
   },
   {
     id: 'community-peer-zoya',
     name: 'Zoya Khan',
-    role: 'Final Year · Media & Club Lead',
-    bio: 'Looking for study buddies or quick campus updates under 500m.',
-    locationSpot: 'Student Courtyard',
-    statusTag: '📚 Studying / Working',
-    distanceMeters: 340,
-    compassDir: '↙ SW',
+    role: 'Content & Media Lead',
+    bio: 'Always happy to exchange ideas, collaborate, or have a good conversation.',
+    locationSpot: 'Hyderabad · Online',
+    statusTag: '☕ Coffee Break',
+    distanceMeters: 0,
     avatarPreset: 'zoya',
   },
 ];
@@ -165,31 +161,31 @@ export function getStarterAutoReply(
 
   if (clean.includes('hi') || clean.includes('hello') || clean.includes('hey') || clean.includes('👋')) {
     if (peerId === 'community-peer-aarav') {
-      return `Hey ${firstName}! 👋 Main abhi paas me hi chai break pe hoon. Kahan baithe ho abhi?`;
+      return `Hey ${firstName}! 👋 Great to connect with you on live chat. What are you working on today?`;
     }
     if (peerId === 'community-peer-priya') {
-      return `Hi ${firstName}! ✨ Nice to see someone active on the 500m radar. Everything good?`;
+      return `Hi ${firstName}! ✨ Lovely to see you online here. How is your day going?`;
     }
     if (peerId === 'community-peer-kabir') {
-      return `Yo ${firstName}! 🙌 500m radar mast kaam kar raha hai. Aap kis side ho abhi?`;
+      return `Hello ${firstName}! 🙌 Welcome to live chat. Where are you joining from?`;
     }
-    return `Hey ${firstName}! 👋 Good to connect nearby! Kya chal raha hai aajkal?`;
+    return `Hey ${firstName}! 👋 Good to connect with you! How have you been?`;
   }
 
   if (clean.includes('📍') || clean.includes('spot') || clean.includes('kaha') || clean.includes('where')) {
-    return `Got your spot ${firstName}! 📍 Main bas 2 minute ki walking distance pe hoon. Apne dosto ko bhi "Invite Nearby" se link bhejo taaki wo bhi live radar pe aa jayein!`;
+    return `Nice ${firstName}! You can also share the invite link with your friends or teammates so they appear live here from anywhere.`;
   }
 
   if (peerId === 'community-peer-aarav') {
-    return `Sahi hai ${firstName}! Vaise agar aap apne paas rakhe dusre phone me ye link khologe to hum dono ke saath aapke real friends bhi 1m–10m distance par live dikhenge 🔥`;
+    return `Sounds great ${firstName}! Anyone who opens this chat link from anywhere will appear right here live so you can message instantly 🔥`;
   }
   if (peerId === 'community-peer-priya') {
-    return `Awesome ${firstName}! You can also post on the 500m Local Buzz feed or share the QR code with friends around you 💬`;
+    return `Awesome ${firstName}! You can share photos, voice notes, and react to messages right inside this chat 💬`;
   }
   if (peerId === 'community-peer-kabir') {
-    return `Bilkul ${firstName}! Jab bhi koi naya real user 500m me online aayega, wo sabse upar top par show hoga. Tab tak humse kabhi bhi chat kar sakte ho!`;
+    return `Bilkul ${firstName}! Jab bhi koi naya user site par live hoga, wo sabhi ko turant yahan upar dikhega chahe kitni bhi door ho!`;
   }
-  return `Haha nice ${firstName}! 😊 Keep your radar open—anyone opening Near500 within 500m will pop up right here in real time.`;
+  return `Haha nice ${firstName}! 😊 Anyone online on this site right now can connect and chat with you in real time.`;
 }
 
 export function loadSavedMessages(currentUserId: string): ChatMessage[] {
@@ -210,7 +206,7 @@ export function loadSavedMessages(currentUserId: string): ChatMessage[] {
     id: 'welcome-msg-aarav-1',
     fromUserId: 'community-peer-aarav',
     toUserId: currentUserId,
-    text: 'Hey! 👋 Welcome to Near500 Radar! Main aapke 500m zone me active hoon. Click karke reply karo ya apne paas baithe friend ko Invite QR dikhao!',
+    text: 'Hey! 👋 Welcome to live chat! Reply anytime or share the invite link with anyone to connect and chat live from anywhere.',
     seen: false,
     reactions: {},
     timestamp: new Date(now - 60000).toLocaleTimeString([], {
@@ -334,22 +330,22 @@ export function loadOrCreateCurrentUser(): CurrentUserProfile {
     if (saved) {
       const parsed = JSON.parse(saved);
       if (parsed && parsed.id && parsed.name) {
-        const now = Date.now();
-        const gpsAge =
-          typeof parsed.gpsUpdatedAt === 'number'
-            ? now - parsed.gpsUpdatedAt
-            : Infinity;
-        const isRecentAndSharp =
-          gpsAge < 90_000 &&
-          typeof parsed.accuracy === 'number' &&
-          parsed.accuracy <= 75;
-
         return {
           ...parsed,
-          lat: isRecentAndSharp ? parsed.lat : null,
-          lng: isRecentAndSharp ? parsed.lng : null,
-          accuracy: isRecentAndSharp ? parsed.accuracy : undefined,
-          gpsUpdatedAt: isRecentAndSharp ? parsed.gpsUpdatedAt : undefined,
+          locationSpot:
+            parsed.locationSpot === 'Live GPS' || !parsed.locationSpot
+              ? 'Online'
+              : parsed.locationSpot,
+          bio:
+            parsed.bio === 'Available to connect within 500m.'
+              ? 'Available for live chat and networking.'
+              : parsed.bio || '',
+          isDiscoverableUnder500m:
+            typeof parsed.isDiscoverableUnder500m === 'boolean'
+              ? parsed.isDiscoverableUnder500m
+              : true,
+          lat: typeof parsed.lat === 'number' ? parsed.lat : null,
+          lng: typeof parsed.lng === 'number' ? parsed.lng : null,
         };
       }
     }
@@ -374,8 +370,8 @@ export function loadOrCreateCurrentUser(): CurrentUserProfile {
     id: `user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     name: `User ${randomSuffix}`,
     role: 'Member',
-    locationSpot: 'Live GPS',
-    bio: 'Available to connect within 500m.',
+    locationSpot: 'Online',
+    bio: 'Available for live chat and networking.',
     statusTag: '🤝 Open to Chat',
     isDiscoverableUnder500m: true,
     avatarPreset: randomPreset,
