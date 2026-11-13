@@ -8,6 +8,7 @@ import {
   User,
   Lock,
   Sparkles,
+  X,
 } from 'lucide-react';
 
 interface CountryOption {
@@ -45,12 +46,16 @@ export interface PhoneVerificationResult {
 }
 
 interface MobileLoginScreenProps {
+  isOpen: boolean;
+  onClose: () => void;
   defaultName?: string;
   accountIdForPhone: (fullPhone: string) => string;
   onVerified: (result: PhoneVerificationResult) => void;
 }
 
 export const MobileLoginScreen: React.FC<MobileLoginScreenProps> = ({
+  isOpen,
+  onClose,
   defaultName = '',
   accountIdForPhone,
   onVerified,
@@ -85,6 +90,29 @@ export const MobileLoginScreen: React.FC<MobileLoginScreenProps> = ({
     }, 1000);
     return () => clearInterval(timer);
   }, [resendSeconds]);
+
+  useEffect(() => {
+    if (isOpen) {
+      setErrorMsg(null);
+      if (verifiedSuccess) {
+        setVerifiedSuccess(false);
+        setStep('phone');
+        setOtpDigits(['', '', '', '', '', '']);
+        setExpectedOtp('');
+      }
+    }
+  }, [isOpen, verifiedSuccess]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
 
   const generateAndSendOtp = async () => {
     setErrorMsg(null);
@@ -247,30 +275,52 @@ export const MobileLoginScreen: React.FC<MobileLoginScreenProps> = ({
     verifyOtpCode(expectedOtp);
   };
 
+  if (!isOpen) return null;
+
   return (
-    <div className="min-h-[100dvh] bg-blue-50 text-slate-900 flex flex-col items-center justify-center px-4 py-6">
-      <div className="w-full max-w-md bg-white border border-blue-200 rounded-3xl shadow-xl overflow-hidden">
+    <div
+      className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="mobile-login-title"
+      onClick={onClose}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="w-full sm:max-w-md bg-white border border-blue-200 rounded-t-3xl sm:rounded-3xl shadow-xl overflow-hidden max-h-[94dvh] overflow-y-auto"
+      >
         {/* Top Brand Bar */}
-        <div className="px-5 sm:px-6 pt-6 pb-5 bg-blue-50/80 border-b border-blue-100 text-center space-y-2">
+        <div className="relative px-5 sm:px-6 pt-6 pb-5 bg-blue-50/80 border-b border-blue-100 text-center space-y-2">
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close login modal"
+            className="w-9 h-9 rounded-full text-slate-400 hover:text-slate-800 hover:bg-white/80 flex items-center justify-center absolute top-3.5 right-3.5 transition-colors cursor-pointer"
+          >
+            <X className="w-5 h-5" />
+          </button>
           <div className="w-12 h-12 rounded-2xl bg-blue-600 text-white flex items-center justify-center text-xl font-bold shadow-sm mx-auto">
             N
           </div>
           <div>
-            <h1 className="text-lg sm:text-xl font-bold text-slate-900 tracking-tight">
+            <h2
+              id="mobile-login-title"
+              className="text-lg sm:text-xl font-bold text-slate-900 tracking-tight"
+            >
               {step === 'phone'
                 ? 'Verify your mobile number'
                 : 'Enter verification code'}
-            </h1>
+            </h2>
             <p className="text-xs sm:text-sm text-slate-600 mt-1">
               {step === 'phone'
-                ? 'Quick WhatsApp-style login to enter NearChat live directory.'
+                ? 'Quick WhatsApp-style verification to enter live chat.'
                 : `We generated a 6-digit code for ${fullPhoneNumber}`}
             </p>
           </div>
         </div>
 
         {/* Form Body */}
-        <div className="p-5 sm:p-6 space-y-4">
+        <div className="p-5 sm:p-6 pb-[max(1.25rem,env(safe-area-inset-bottom))] space-y-4">
           {step === 'phone' ? (
             <form onSubmit={handlePhoneFormSubmit} className="space-y-4">
               <div>

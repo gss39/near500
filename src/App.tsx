@@ -38,6 +38,7 @@ import {
   MobileLoginScreen,
   PhoneVerificationResult,
 } from './components/MobileLoginScreen';
+import { HomePage } from './components/HomePage';
 import {
   LiveProximityRelay,
   RelayPacket,
@@ -98,6 +99,7 @@ export default function App() {
 
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [isMyProfileOpen, setIsMyProfileOpen] = useState(false);
+  const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
 
   const currentUserRef = useRef(currentUser);
   useEffect(() => {
@@ -565,6 +567,7 @@ export default function App() {
     setSelectedUserId(null);
     setIsMyProfileOpen(false);
     setIsInviteOpen(false);
+    setIsLoginModalOpen(false);
 
     const loggedOutProfile: CurrentUserProfile = {
       ...currentUserRef.current,
@@ -921,11 +924,19 @@ export default function App() {
 
   if (!currentUser.isPhoneVerified) {
     return (
-      <MobileLoginScreen
-        defaultName={currentUser.name}
-        accountIdForPhone={getPhoneAccountId}
-        onVerified={handlePhoneVerified}
-      />
+      <>
+        <HomePage onOpenLogin={() => setIsLoginModalOpen(true)} />
+        <MobileLoginScreen
+          isOpen={isLoginModalOpen}
+          onClose={() => setIsLoginModalOpen(false)}
+          defaultName={currentUser.name}
+          accountIdForPhone={getPhoneAccountId}
+          onVerified={(result) => {
+            setIsLoginModalOpen(false);
+            handlePhoneVerified(result);
+          }}
+        />
+      </>
     );
   }
 
