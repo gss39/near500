@@ -2,6 +2,7 @@
 
 @layer base {
   :root {
+    --font-display: 'Outfit', 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
     --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
     --font-mono: 'JetBrains Mono', monospace;
     --theme-bg: #eff6ff;
@@ -24,6 +25,10 @@
   h1, h2, h3, h4 {
     text-wrap: balance;
   }
+}
+
+.font-display {
+  font-family: var(--font-display);
 }
 
 .font-mono-tabular {

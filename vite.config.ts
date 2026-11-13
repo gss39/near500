@@ -18,7 +18,13 @@ export default defineConfig(({ command }) => {
         output: {
           entryFileNames: 'assets/near500.js',
           chunkFileNames: 'assets/chunk-[name].js',
-          assetFileNames: 'assets/near500.[ext]',
+          assetFileNames: (assetInfo) => {
+            const firstName = assetInfo.names?.[0] || assetInfo.name || '';
+            if (firstName.endsWith('.css')) {
+              return 'assets/near500.css';
+            }
+            return 'assets/[name]-[hash][extname]';
+          },
         },
       },
     },
