@@ -25,6 +25,8 @@ import {
   CurrentUserProfile,
   ChatMessage,
   BlockedUserInfo,
+  AvatarPreset,
+  getPhoneAccountId,
 } from './data/nearbyUsers';
 import { UserAvatar } from './components/UserAvatar';
 import {
@@ -32,6 +34,10 @@ import {
   CurrentUserModal,
   SendMessagePayload,
 } from './components/ProfileModals';
+import {
+  MobileLoginScreen,
+  PhoneVerificationResult,
+} from './components/MobileLoginScreen';
 import {
   LiveProximityRelay,
   RelayPacket,
@@ -155,12 +161,22 @@ export default function App() {
     []
   );
 
-  // Sync current user's live profile with server AND global live relay (no GPS/distance limit)
+  // Sync current user's live profile with server AND global live relay (keep phoneNumber private)
   const syncWithServer = useCallback(
     async (profileToSync?: CurrentUserProfile, requestPeersReply = false) => {
       const user = profileToSync || currentUserRef.current;
+      if (!user.isPhoneVerified) return;
 
-      relayRef.current?.broadcastPresence(user, requestPeersReply, requestPeersReply);
+      const publicProfile: CurrentUserProfile = {
+        ...user,
+        phoneNumber: undefined,
+      };
+
+      relayRef.current?.broadcastPresence(
+        publicProfile,
+        requestPeersReply,
+        requestPeersReply
+      );
       if (requestPeersReply) {
         relayRef.current?.requestAllPeersPresence(true);
       }
@@ -169,7 +185,7 @@ export default function App() {
         const res = await fetch('/api/users/sync', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(user),
+          body: JSON.stringify(publicProfile),
         });
         if (!res.ok) return;
         const data = await res.json();
@@ -222,12 +238,15 @@ export default function App() {
     []
   );
 
-  // Initialize LiveProximityRelay with throttled handshake replies and chat messages
+  // Initialize LiveProximityRelay once mobile login is verified
   useEffect(() => {
+    if (!currentUser.isPhoneVerified) return;
+
     const relay = new LiveProximityRelay(
       currentUser.id,
       (packet: RelayPacket) => {
         const me = currentUserRef.current;
+        const publicMe: CurrentUserProfile = { ...me, phoneNumber: undefined };
         if (packet.type === 'presence') {
           const peer = packet.profile;
           if (!peer || !peer.id || peer.id === me.id) return;
@@ -245,7 +264,7 @@ export default function App() {
                 lastReplyTimeRef.current[peer.id] = now;
                 relayRef.current?.sendDirectPacket(peer.id, {
                   type: 'presence',
-                  profile: me,
+                  profile: publicMe,
                   replyRequested: false,
                   timestamp: now,
                 });
@@ -267,7 +286,7 @@ export default function App() {
               lastReplyTimeRef.current[packet.fromUserId] = now;
               relayRef.current?.sendDirectPacket(packet.fromUserId, {
                 type: 'presence',
-                profile: me,
+                profile: publicMe,
                 replyRequested: false,
                 timestamp: now,
               });
@@ -343,15 +362,20 @@ export default function App() {
         }
       },
       () => {
-        relayRef.current?.broadcastPresence(currentUserRef.current, true, true);
+        relayRef.current?.broadcastPresence(
+          { ...currentUserRef.current, phoneNumber: undefined },
+          true,
+          true
+        );
       }
     );
 
     relayRef.current = relay;
     return () => {
       relay.destroy();
+      relayRef.current = null;
     };
-  }, [currentUser.id]);
+  }, [currentUser.id, currentUser.isPhoneVerified]);
 
   // Prune stale relay peers (> 180s inactive) and clear expired typing states
   useEffect(() => {
@@ -458,8 +482,9 @@ export default function App() {
     blockedUsers,
   ]);
 
-  // Announce user live immediately on load & whenever tab regains focus
+  // Announce user live immediately once verified & whenever tab regains focus
   useEffect(() => {
+    if (!currentUser.isPhoneVerified) return;
     syncWithServer(currentUserRef.current, true);
 
     const handleVisibilityOrFocus = () => {
@@ -475,9 +500,10 @@ export default function App() {
       window.removeEventListener('focus', handleVisibilityOrFocus);
       document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
     };
-  }, [syncWithServer]);
+  }, [syncWithServer, currentUser.isPhoneVerified]);
 
   useEffect(() => {
+    if (!currentUser.isPhoneVerified) return;
     let evtSource: EventSource | null = null;
     try {
       evtSource = new EventSource('/api/stream');
@@ -496,7 +522,67 @@ export default function App() {
       evtSource?.close();
       clearInterval(interval);
     };
-  }, [syncWithServer]);
+  }, [syncWithServer, currentUser.isPhoneVerified]);
+
+  const handlePhoneVerified = (result: PhoneVerificationResult) => {
+    const prev = currentUserRef.current;
+    const newId = getPhoneAccountId(result.phoneNumber);
+    const restored = result.existingProfile;
+
+    const verifiedProfile: CurrentUserProfile = {
+      ...prev,
+      id: newId,
+      phoneNumber: result.phoneNumber,
+      isPhoneVerified: true,
+      name:
+        result.displayName ||
+        restored?.name ||
+        (!prev.name.startsWith('User ') ? prev.name : `User ${result.phoneNumber.slice(-4)}`),
+      role: restored?.role || prev.role,
+      bio: restored?.bio || prev.bio,
+      locationSpot: restored?.locationSpot || prev.locationSpot,
+      statusTag: restored?.statusTag || prev.statusTag,
+      photoUrl: restored?.photoUrl || prev.photoUrl,
+      avatarPreset: (restored?.avatarPreset as AvatarPreset) || prev.avatarPreset,
+    };
+
+    if (prev.id !== newId) {
+      setMessages((msgs) =>
+        msgs.map((m) => ({
+          ...m,
+          fromUserId: m.fromUserId === prev.id ? newId : m.fromUserId,
+          toUserId: m.toUserId === prev.id ? newId : m.toUserId,
+        }))
+      );
+    }
+
+    setCurrentUser(verifiedProfile);
+    saveCurrentUserToStorage(verifiedProfile);
+  };
+
+  const handleLogout = async () => {
+    const leavingId = currentUserRef.current.id;
+    setSelectedUserId(null);
+    setIsMyProfileOpen(false);
+    setIsInviteOpen(false);
+
+    const loggedOutProfile: CurrentUserProfile = {
+      ...currentUserRef.current,
+      isPhoneVerified: false,
+    };
+    setCurrentUser(loggedOutProfile);
+    saveCurrentUserToStorage(loggedOutProfile);
+
+    try {
+      await fetch('/api/users/leave', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: leavingId }),
+      });
+    } catch {
+      // Static host fallback
+    }
+  };
 
   const handleSaveMyProfile = (updated: CurrentUserProfile) => {
     setCurrentUser(updated);
@@ -832,6 +918,16 @@ export default function App() {
         (m.fromUserId === selectedUserId && m.toUserId === currentUser.id)
     );
   }, [messages, currentUser.id, selectedUserId]);
+
+  if (!currentUser.isPhoneVerified) {
+    return (
+      <MobileLoginScreen
+        defaultName={currentUser.name}
+        accountIdForPhone={getPhoneAccountId}
+        onVerified={handlePhoneVerified}
+      />
+    );
+  }
 
   return (
     <div className="min-h-[100dvh] bg-blue-50 text-slate-900 flex flex-col">
@@ -1183,6 +1279,7 @@ export default function App() {
         onUnblockAll={handleUnblockAll}
         onClose={() => setIsMyProfileOpen(false)}
         onSaveProfile={handleSaveMyProfile}
+        onLogout={handleLogout}
       />
     </div>
   );

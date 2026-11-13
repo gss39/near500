@@ -54,6 +54,8 @@ export interface CurrentUserProfile {
   photoUrl?: string;
   isDiscoverableUnder500m: boolean;
   avatarPreset: AvatarPreset;
+  phoneNumber?: string;
+  isPhoneVerified?: boolean;
   lat: number | null;
   lng: number | null;
   accuracy?: number;
@@ -381,6 +383,22 @@ export function loadOrCreateCurrentUser(): CurrentUserProfile {
 
   saveCurrentUserToStorage(freshProfile);
   return freshProfile;
+}
+
+export function getPhoneAccountId(fullPhone: string): string {
+  const normalized = fullPhone.replace(/[^\d+]/g, '');
+  let h1 = 0x811c9dc5;
+  let h2 = 0x01000193;
+  for (let i = 0; i < normalized.length; i++) {
+    const ch = normalized.charCodeAt(i);
+    h1 ^= ch;
+    h1 = Math.imul(h1, 0x01000193);
+    h2 ^= ch + i;
+    h2 = Math.imul(h2, 0x85ebca6b);
+  }
+  const part1 = (h1 >>> 0).toString(36);
+  const part2 = (h2 >>> 0).toString(36);
+  return `user-m-${part1}${part2}`;
 }
 
 export function saveCurrentUserToStorage(profile: CurrentUserProfile) {

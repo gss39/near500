@@ -83,6 +83,10 @@ function saveStore(store: StoreData) {
 
 const store: StoreData = loadStore();
 const typingPairs = new Map<string, number>();
+const pendingOtps = new Map<
+  string,
+  { code: string; expiresAt: number; attempts: number }
+>();
 
 function getDistanceMeters(
   lat1: number,
@@ -189,6 +193,72 @@ function broadcastUpdate(extra?: Record<string, unknown>) {
 async function startServer() {
   const app = express();
   app.use(express.json({ limit: '6mb' }));
+
+  app.post('/api/auth/send-otp', (req, res) => {
+    const rawPhone = String(req.body?.phoneNumber || '').replace(/[^\d+]/g, '');
+    if (rawPhone.replace(/\D/g, '').length < 7) {
+      res.status(400).json({ error: 'Please enter a valid mobile number.' });
+      return;
+    }
+
+    const verificationCode = String(Math.floor(100000 + Math.random() * 900000));
+    pendingOtps.set(rawPhone, {
+      code: verificationCode,
+      expiresAt: Date.now() + 5 * 60 * 1000,
+      attempts: 0,
+    });
+
+    res.json({
+      ok: true,
+      verificationCode,
+      expiresInSeconds: 300,
+    });
+  });
+
+  app.post('/api/auth/verify-otp', (req, res) => {
+    const rawPhone = String(req.body?.phoneNumber || '').replace(/[^\d+]/g, '');
+    const code = String(req.body?.code || '').trim();
+    const accountId = String(req.body?.accountId || '').trim();
+
+    const record = pendingOtps.get(rawPhone);
+    if (!record) {
+      res.status(400).json({ error: 'Verification code expired. Please resend.' });
+      return;
+    }
+    if (Date.now() > record.expiresAt) {
+      pendingOtps.delete(rawPhone);
+      res.status(400).json({ error: 'Verification code expired. Please resend.' });
+      return;
+    }
+    if (record.attempts >= 5) {
+      pendingOtps.delete(rawPhone);
+      res.status(400).json({ error: 'Too many incorrect attempts. Please resend code.' });
+      return;
+    }
+    if (record.code !== code) {
+      record.attempts += 1;
+      res.status(400).json({ error: 'Incorrect verification code. Try again.' });
+      return;
+    }
+
+    pendingOtps.delete(rawPhone);
+    const existing = accountId ? store.users[accountId] : undefined;
+
+    res.json({
+      verified: true,
+      existingProfile: existing
+        ? {
+            name: existing.name,
+            role: existing.role,
+            bio: existing.bio,
+            locationSpot: existing.locationSpot,
+            statusTag: existing.statusTag,
+            photoUrl: existing.photoUrl,
+            avatarPreset: existing.avatarPreset,
+          }
+        : null,
+    });
+  });
 
   app.get('/api/stream', (req, res) => {
     res.setHeader('Content-Type', 'text/event-stream');
