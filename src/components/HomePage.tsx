@@ -1,77 +1,24 @@
 import React, { useState } from 'react';
 import {
   ArrowRight,
-  CheckCheck,
   Lock,
   LogIn,
   MessageSquare,
   Mic,
-  Pause,
   Phone,
-  Play,
   QrCode,
-  Send,
   ShieldCheck,
   Users,
 } from 'lucide-react';
 import { COMMUNITY_STARTER_PEERS } from '../data/nearbyUsers';
 import { UserAvatar } from './UserAvatar';
-import heroConnectImg from '../assets/images/nearchat_hero_connect_1794545984070.jpg';
+import guyChattingImg from '../assets/images/nearchat_guy_chatting_1794546655259.jpg';
+import girlChattingImg from '../assets/images/nearchat_girl_chatting_1794546655268.jpg';
 import mobileDeskImg from '../assets/images/nearchat_mobile_desk_1794545983386.jpg';
-import globalCollabImg from '../assets/images/nearchat_global_collab_1794545984045.jpg';
 
 interface HomePageProps {
   onOpenLogin: () => void;
 }
-
-interface PreviewConversation {
-  incoming: string;
-  outgoing: string;
-  followUp: string;
-  voiceDuration: string;
-  incomingTime: string;
-  outgoingTime: string;
-  followUpTime: string;
-}
-
-const PREVIEW_THREADS: Record<string, PreviewConversation> = {
-  'community-peer-aarav': {
-    incoming:
-      'Hey! Just pushed the updated design. Want to review everything together in live chat?',
-    outgoing:
-      'Looks sharp on both mobile and desktop. Sending a quick voice note now.',
-    followUp: 'Awesome — open the chat room whenever you are ready.',
-    voiceDuration: '0:18',
-    incomingTime: '10:24 AM',
-    outgoingTime: '10:25 AM',
-    followUpTime: '10:26 AM',
-  },
-  'community-peer-priya': {
-    incoming:
-      'Shared the latest screens from Mumbai. How is the layout looking on your phone?',
-    outgoing:
-      'Super clean and fast! Let us invite the rest of the team with the share link.',
-    followUp: 'Great — anyone who verifies their number joins immediately.',
-    voiceDuration: '0:14',
-    incomingTime: '09:42 AM',
-    outgoingTime: '09:44 AM',
-    followUpTime: '09:45 AM',
-  },
-  'community-peer-kabir': {
-    incoming:
-      'Are founders from different cities active in the directory right now?',
-    outgoing:
-      'Yes, there is no distance limit anymore. Verify your mobile number once and chat with everyone.',
-    followUp: 'Nice, logging in with my mobile number right now.',
-    voiceDuration: '0:22',
-    incomingTime: '08:15 AM',
-    outgoingTime: '08:16 AM',
-    followUpTime: '08:17 AM',
-  },
-};
-
-const PREVIEW_REACTIONS = ['👍', '❤️', '🔥'];
-const VOICE_BAR_HEIGHTS = [10, 18, 12, 24, 16, 22, 14, 20, 11, 17, 23, 13, 19, 12];
 
 const AmberDotGrid: React.FC<{ cols: number; rows: number; className?: string }> = ({
   cols,
@@ -86,38 +33,18 @@ const AmberDotGrid: React.FC<{ cols: number; rows: number; className?: string }>
       style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
     >
       {dots.map((_, idx) => (
-        <span
-          key={idx}
-          className="w-1.5 h-1.5 rounded-full bg-[#FBBF24]"
-        />
+        <span key={idx} className="w-1.5 h-1.5 rounded-full bg-[#FBBF24]" />
       ))}
     </div>
   );
 };
 
 export const HomePage: React.FC<HomePageProps> = ({ onOpenLogin }) => {
-  const previewPeers = COMMUNITY_STARTER_PEERS.slice(0, 3);
-  const [activePeerId, setActivePeerId] = useState<string>(previewPeers[0].id);
-  const [selectedReaction, setSelectedReaction] = useState<Record<string, string>>({
-    'community-peer-aarav': '👍',
-  });
-  const [isVoicePlaying, setIsVoicePlaying] = useState(false);
+  const previewPeers = COMMUNITY_STARTER_PEERS.slice(0, 2);
 
-  const [heroImgFailed, setHeroImgFailed] = useState(false);
-  const [collabImgFailed, setCollabImgFailed] = useState(false);
+  const [guyImgFailed, setGuyImgFailed] = useState(false);
+  const [girlImgFailed, setGirlImgFailed] = useState(false);
   const [deskImgFailed, setDeskImgFailed] = useState(false);
-
-  const activePeer =
-    previewPeers.find((p) => p.id === activePeerId) || previewPeers[0];
-  const activeThread =
-    PREVIEW_THREADS[activePeer.id] || PREVIEW_THREADS['community-peer-aarav'];
-
-  const handleToggleReaction = (emoji: string) => {
-    setSelectedReaction((prev) => ({
-      ...prev,
-      [activePeer.id]: prev[activePeer.id] === emoji ? '' : emoji,
-    }));
-  };
 
   return (
     <div className="min-h-[100dvh] bg-white text-slate-900 flex flex-col">
@@ -147,12 +74,6 @@ export const HomePage: React.FC<HomePageProps> = ({ onOpenLogin }) => {
                 Features
               </a>
               <a
-                href="#live-preview"
-                className="hover:text-white transition-colors whitespace-nowrap shrink-0"
-              >
-                Live Chat
-              </a>
-              <a
                 href="#how-it-works"
                 className="hover:text-white transition-colors whitespace-nowrap shrink-0"
               >
@@ -180,7 +101,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onOpenLogin }) => {
         {/* Hero Split */}
         <section className="max-w-6xl mx-auto px-4 sm:px-8 pt-6 pb-16 sm:pt-12 sm:pb-24">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 lg:gap-10 items-center">
-            {/* Left Side: Bold Editorial Headline + CTA Buttons */}
+            {/* Left Side: Unique Headline + Single Primary Login CTA */}
             <div className="lg:col-span-5 space-y-6">
               <div className="space-y-4">
                 <h1
@@ -190,12 +111,12 @@ export const HomePage: React.FC<HomePageProps> = ({ onOpenLogin }) => {
                     textWrap: 'balance',
                   }}
                 >
-                  Have your
+                  Real Talk,
                   <br />
-                  best chat
+                  Zero Limits.
                 </h1>
                 <p className="text-base sm:text-lg text-blue-100 leading-relaxed max-w-md">
-                  Fast, easy &amp; unlimited global live chat right from your browser.
+                  Message anyone online in seconds — fast, private &amp; unlimited global chat right from your browser.
                 </p>
               </div>
 
@@ -207,42 +128,34 @@ export const HomePage: React.FC<HomePageProps> = ({ onOpenLogin }) => {
                 >
                   <Phone className="w-4 h-4 shrink-0" />
                   <span>Login with Mobile</span>
+                  <ArrowRight className="w-4 h-4 shrink-0" />
                 </button>
-
-                <a
-                  href="#live-preview"
-                  className="min-h-[48px] px-7 py-3 rounded-full border border-white/65 hover:bg-white/10 text-white text-sm font-semibold transition-colors flex items-center justify-center whitespace-nowrap shrink-0"
-                >
-                  Live Preview
-                </a>
               </div>
 
               <p className="text-xs text-blue-100/85 pt-1">
-                6-digit mobile OTP verification · Private phone numbers · No app download
+                6-digit mobile OTP verification · Private phone numbers · No app install
               </p>
             </div>
 
-            {/* Right Side: Staggered Dual-Portrait Visual Collage with Amber Dot Grids & Chat Bubbles */}
+            {/* Right Side: Guy on One Side & Girl on the Other Side Chatting */}
             <div className="lg:col-span-7">
               <div className="relative max-w-[560px] mx-auto lg:ml-auto lg:mr-0 pt-4 pb-6 sm:pt-6 sm:pb-8">
                 <div className="grid grid-cols-12 gap-4 sm:gap-6 items-start">
-                  {/* Left Staggered Portrait Column */}
-                  <div className="col-span-7 relative">
-                    {/* Top-Left Amber Dot Pattern */}
+                  {/* Left Portrait Column: Guy Chatting */}
+                  <div className="col-span-6 relative">
                     <AmberDotGrid
                       cols={7}
                       rows={7}
                       className="absolute -top-5 -left-4 sm:-top-6 sm:-left-6 opacity-95"
                     />
 
-                    {/* Primary Portrait Photo */}
-                    <div className="relative z-10 aspect-[4/5] w-full rounded-md overflow-hidden bg-blue-800 shadow-xl">
-                      {!heroImgFailed ? (
+                    <div className="relative z-10 aspect-[3/4] w-full rounded-md overflow-hidden bg-blue-800 shadow-xl">
+                      {!guyImgFailed ? (
                         <img
-                          src={heroConnectImg}
-                          alt="Smiling member messaging live on NearChat"
+                          src={guyChattingImg}
+                          alt="Young man smiling while texting on his phone"
                           referrerPolicy="no-referrer"
-                          onError={() => setHeroImgFailed(true)}
+                          onError={() => setGuyImgFailed(true)}
                           className="w-full h-full object-cover object-top"
                         />
                       ) : (
@@ -252,39 +165,39 @@ export const HomePage: React.FC<HomePageProps> = ({ onOpenLogin }) => {
                       )}
                     </div>
 
-                    {/* Bottom-Left Amber Chat Bubble + Circular Avatar */}
-                    <div className="relative z-20 mt-4 flex items-center gap-2.5 justify-end pr-2">
+                    {/* Guy's Outgoing Bubble */}
+                    <div className="relative z-20 mt-4 flex items-center gap-2.5 justify-end pr-1">
                       <div className="px-4 py-2 rounded-full bg-[#EA960A] text-white text-xs sm:text-sm font-semibold shadow-md whitespace-nowrap">
-                        I&apos;m online now!
+                        Hey! Free to chat?
                       </div>
                       <div className="ring-2 ring-white/80 rounded-full shrink-0">
                         <UserAvatar
-                          preset={previewPeers[1].avatarPreset}
-                          name={previewPeers[1].name}
+                          preset={previewPeers[0].avatarPreset}
+                          name={previewPeers[0].name}
                           size="sm"
                         />
                       </div>
                     </div>
                   </div>
 
-                  {/* Right Staggered Column (Floating Chat Bubble + Typing Dots + Lower Portrait) */}
-                  <div className="col-span-5 space-y-4 sm:space-y-5 pt-6 sm:pt-12 relative">
-                    {/* Floating Top-Right Incoming Bubble */}
-                    <div className="relative z-20 space-y-2.5 -ml-4 sm:-ml-6">
+                  {/* Right Portrait Column: Girl Chatting */}
+                  <div className="col-span-6 space-y-4 sm:space-y-5 pt-6 sm:pt-12 relative">
+                    {/* Girl's Incoming Reply Bubble */}
+                    <div className="relative z-20 space-y-2.5 -ml-2 sm:-ml-4">
                       <div className="flex items-center gap-2">
                         <div className="ring-2 ring-white/80 rounded-full shrink-0">
                           <UserAvatar
-                            preset={previewPeers[0].avatarPreset}
-                            name={previewPeers[0].name}
+                            preset={previewPeers[1].avatarPreset}
+                            name={previewPeers[1].name}
                             size="sm"
                           />
                         </div>
-                        <div className="px-3.5 py-2 rounded-full bg-[#EA960A] text-white text-[11px] sm:text-xs font-semibold shadow-md truncate">
-                          Hey! Quick chat?
+                        <div className="px-3.5 py-2 rounded-full bg-[#EA960A] text-white text-[11px] sm:text-xs font-semibold shadow-md whitespace-nowrap">
+                          Yes! I&apos;m live now
                         </div>
                       </div>
 
-                      {/* Subtle Typing Dots Bubble */}
+                      {/* Subtle Typing Bubble */}
                       <div className="ml-10 inline-flex items-center gap-1.5 px-4 py-2.5 rounded-full bg-white/18 backdrop-blur-xs">
                         <span className="w-1.5 h-1.5 rounded-full bg-white/60" />
                         <span className="w-1.5 h-1.5 rounded-full bg-white" />
@@ -292,21 +205,20 @@ export const HomePage: React.FC<HomePageProps> = ({ onOpenLogin }) => {
                       </div>
                     </div>
 
-                    {/* Lower Right Portrait + Dot Grid Behind Top-Left Edge */}
                     <div className="relative">
                       <AmberDotGrid
                         cols={6}
                         rows={7}
-                        className="absolute -top-6 -left-8 sm:-left-10 opacity-95"
+                        className="absolute -top-6 -left-6 sm:-left-8 opacity-95"
                       />
-                      <div className="relative z-10 aspect-[4/5] w-full rounded-md overflow-hidden bg-blue-800 shadow-xl">
-                        {!collabImgFailed ? (
+                      <div className="relative z-10 aspect-[3/4] w-full rounded-md overflow-hidden bg-blue-800 shadow-xl">
+                        {!girlImgFailed ? (
                           <img
-                            src={globalCollabImg}
-                            alt="Team members collaborating and chatting globally"
+                            src={girlChattingImg}
+                            alt="Smiling young woman reading and replying to messages on her phone"
                             referrerPolicy="no-referrer"
-                            onError={() => setCollabImgFailed(true)}
-                            className="w-full h-full object-cover object-center"
+                            onError={() => setGirlImgFailed(true)}
+                            className="w-full h-full object-cover object-top"
                           />
                         ) : (
                           <div className="w-full h-full bg-blue-700 flex items-center justify-center">
@@ -324,217 +236,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onOpenLogin }) => {
       </div>
 
       <main className="flex-1">
-        {/* 2. INTERACTIVE LIVE CHAT PREVIEW */}
-        <section id="live-preview" className="bg-[#F5F8FF] py-14 sm:py-20 border-b border-slate-200/70">
-          <div className="max-w-6xl mx-auto px-4 sm:px-8 space-y-8">
-            <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
-              <div className="space-y-2 max-w-xl">
-                <p className="text-xs font-bold text-[#1161FF] tracking-wide">
-                  Interactive Preview
-                </p>
-                <h2 className="font-display text-2xl sm:text-4xl font-bold tracking-tight text-slate-950">
-                  Instant messaging for everyone
-                </h2>
-                <p className="text-sm sm:text-base text-slate-600 leading-relaxed">
-                  Tap any member below to preview a live conversation, test voice playback, or react before logging in.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={onOpenLogin}
-                className="min-h-[44px] px-6 py-2.5 rounded-full bg-[#1161FF] hover:bg-blue-700 text-white text-sm font-semibold transition-colors flex items-center justify-center gap-2 whitespace-nowrap shrink-0 cursor-pointer"
-              >
-                <span>Open Live Chat</span>
-                <ArrowRight className="w-4 h-4" />
-              </button>
-            </div>
-
-            {/* Clean Two-Pane Chat Window */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 rounded-3xl overflow-hidden border border-blue-200 bg-white shadow-sm">
-              {/* Left Contacts List */}
-              <div className="lg:col-span-4 border-b lg:border-b-0 lg:border-r border-slate-200 p-4 sm:p-5 space-y-2 bg-slate-50/70">
-                <p className="text-xs font-semibold text-slate-500 px-2 pb-1">
-                  Online Members
-                </p>
-                {previewPeers.map((peer) => {
-                  const isActive = peer.id === activePeer.id;
-                  const snippet = PREVIEW_THREADS[peer.id]?.incoming || peer.bio;
-                  return (
-                    <button
-                      key={peer.id}
-                      type="button"
-                      onClick={() => {
-                        setActivePeerId(peer.id);
-                        setIsVoicePlaying(false);
-                      }}
-                      className={`w-full text-left p-3 rounded-2xl transition-colors flex items-center gap-3 cursor-pointer ${
-                        isActive
-                          ? 'bg-blue-50 border border-blue-200'
-                          : 'hover:bg-white border border-transparent'
-                      }`}
-                    >
-                      <UserAvatar
-                        preset={peer.avatarPreset}
-                        name={peer.name}
-                        size="md"
-                        className="shrink-0"
-                      />
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-sm font-bold text-slate-900 truncate">
-                            {peer.name}
-                          </span>
-                          <span className="text-[11px] font-mono-tabular text-slate-400 shrink-0">
-                            {PREVIEW_THREADS[peer.id]?.incomingTime}
-                          </span>
-                        </div>
-                        <p className="text-xs text-slate-500 truncate mt-0.5">
-                          {snippet}
-                        </p>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* Right Active Conversation Thread */}
-              <div className="lg:col-span-8 flex flex-col justify-between bg-white">
-                {/* Thread Header */}
-                <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <UserAvatar
-                      preset={activePeer.avatarPreset}
-                      name={activePeer.name}
-                      size="md"
-                      className="shrink-0"
-                    />
-                    <div className="min-w-0">
-                      <p className="text-sm font-bold text-slate-900 truncate">
-                        {activePeer.name}
-                      </p>
-                      <p className="text-xs text-slate-500 truncate">
-                        {activePeer.role} · {activePeer.locationSpot}
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={onOpenLogin}
-                    className="min-h-[36px] px-4 py-1.5 rounded-full bg-blue-50 hover:bg-blue-100 text-[#1161FF] text-xs font-semibold whitespace-nowrap shrink-0 cursor-pointer transition-colors"
-                  >
-                    Message {activePeer.name.split(' ')[0]}
-                  </button>
-                </div>
-
-                {/* Messages Canvas */}
-                <div className="p-5 space-y-4">
-                  {/* Incoming */}
-                  <div className="flex flex-col items-start">
-                    <div className="px-4 py-2.5 rounded-2xl bg-slate-100 text-xs sm:text-sm text-slate-800 max-w-[85%] leading-relaxed">
-                      {activeThread.incoming}
-                    </div>
-                    <span className="text-[11px] text-slate-400 font-mono-tabular mt-1 px-1">
-                      {activeThread.incomingTime}
-                    </span>
-                  </div>
-
-                  {/* Outgoing + Interactive Voice Note */}
-                  <div className="flex flex-col items-end space-y-2">
-                    <div className="px-4 py-2.5 rounded-2xl bg-[#1161FF] text-white text-xs sm:text-sm max-w-[85%] leading-relaxed">
-                      {activeThread.outgoing}
-                    </div>
-
-                    <div className="px-3.5 py-2.5 rounded-2xl bg-[#1161FF] text-white flex items-center gap-3 max-w-[85%]">
-                      <button
-                        type="button"
-                        onClick={() => setIsVoicePlaying((prev) => !prev)}
-                        aria-label={isVoicePlaying ? 'Pause voice preview' : 'Play voice preview'}
-                        className="w-8 h-8 rounded-full bg-white text-[#1161FF] flex items-center justify-center shrink-0 cursor-pointer hover:bg-blue-50 transition-colors"
-                      >
-                        {isVoicePlaying ? (
-                          <Pause className="w-3.5 h-3.5" />
-                        ) : (
-                          <Play className="w-3.5 h-3.5 ml-0.5" />
-                        )}
-                      </button>
-                      <div className="flex items-center gap-1" aria-hidden="true">
-                        {VOICE_BAR_HEIGHTS.map((height, idx) => (
-                          <span
-                            key={idx}
-                            className={`w-1 rounded-full transition-opacity ${
-                              isVoicePlaying ? 'bg-white' : 'bg-white/75'
-                            }`}
-                            style={{ height: `${height}px` }}
-                          />
-                        ))}
-                      </div>
-                      <span className="text-[11px] font-mono-tabular text-blue-100 shrink-0">
-                        {activeThread.voiceDuration}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-1 text-[11px] text-slate-400 font-mono-tabular px-1">
-                      <span>{activeThread.outgoingTime}</span>
-                      <CheckCheck className="w-3.5 h-3.5 text-[#1161FF]" />
-                    </div>
-                  </div>
-
-                  {/* Follow-up Incoming with Interactive Reactions */}
-                  <div className="flex flex-col items-start space-y-1.5">
-                    <div className="px-4 py-2.5 rounded-2xl bg-slate-100 text-xs sm:text-sm text-slate-800 max-w-[85%] leading-relaxed">
-                      {activeThread.followUp}
-                    </div>
-                    <div className="flex items-center gap-2 px-1">
-                      <span className="text-[11px] text-slate-400 font-mono-tabular">
-                        {activeThread.followUpTime}
-                      </span>
-                      <div className="flex items-center gap-1">
-                        {PREVIEW_REACTIONS.map((emoji) => {
-                          const isChosen = selectedReaction[activePeer.id] === emoji;
-                          return (
-                            <button
-                              key={emoji}
-                              type="button"
-                              onClick={() => handleToggleReaction(emoji)}
-                              className={`px-2 py-0.5 rounded-lg text-xs transition-colors cursor-pointer ${
-                                isChosen
-                                  ? 'bg-blue-50 border border-blue-300 text-slate-900'
-                                  : 'bg-slate-50 border border-slate-200 text-slate-600 hover:bg-slate-100'
-                              }`}
-                            >
-                              {emoji}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Preview Composer */}
-                <div className="p-4 border-t border-slate-100 bg-slate-50/70 flex items-center gap-2.5">
-                  <button
-                    type="button"
-                    onClick={onOpenLogin}
-                    className="flex-1 min-h-[44px] px-4 py-2 rounded-full bg-white hover:bg-blue-50/40 border border-slate-200 text-left text-xs sm:text-sm text-slate-500 transition-colors cursor-pointer truncate"
-                  >
-                    Verify your mobile number to reply to {activePeer.name.split(' ')[0]}...
-                  </button>
-                  <button
-                    type="button"
-                    onClick={onOpenLogin}
-                    className="min-h-[44px] px-5 rounded-full bg-[#1161FF] hover:bg-blue-700 text-white text-xs sm:text-sm font-semibold flex items-center gap-1.5 shrink-0 cursor-pointer transition-colors"
-                  >
-                    <Send className="w-3.5 h-3.5" />
-                    <span>Login</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* 3. FEATURES BENTO SECTION */}
+        {/* 2. FEATURES BENTO SECTION */}
         <section id="features" className="max-w-6xl mx-auto px-4 sm:px-8 py-14 sm:py-20">
           <div className="max-w-2xl mb-10 space-y-2">
             <p className="text-xs font-bold text-[#1161FF] tracking-wide">
@@ -670,7 +372,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onOpenLogin }) => {
           </div>
         </section>
 
-        {/* 4. HOW IT WORKS */}
+        {/* 3. HOW IT WORKS */}
         <section
           id="how-it-works"
           className="bg-[#F5F8FF] border-y border-slate-200 py-14 sm:py-16"
@@ -729,12 +431,12 @@ export const HomePage: React.FC<HomePageProps> = ({ onOpenLogin }) => {
           </div>
         </section>
 
-        {/* 5. PRIVACY & CLOSING CONVERSION BANNER */}
+        {/* 4. PRIVACY & CLOSING CONVERSION BANNER */}
         <section id="privacy" className="max-w-6xl mx-auto px-4 sm:px-8 py-14 sm:py-16">
           <div className="rounded-3xl bg-[#1161FF] text-white p-7 sm:p-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
             <div className="space-y-2 max-w-2xl">
               <h2 className="font-display text-2xl sm:text-3xl font-bold tracking-tight">
-                Ready for your best web chat?
+                Ready to start talking live?
               </h2>
               <p className="text-sm sm:text-base text-blue-100 leading-relaxed">
                 Verify your mobile number in seconds. Your phone number stays completely private, and you remain in full control to block users, clear chats, or log out anytime.
@@ -766,11 +468,11 @@ export const HomePage: React.FC<HomePageProps> = ({ onOpenLogin }) => {
             <a href="#features" className="hover:text-slate-900 transition-colors">
               Features
             </a>
-            <a href="#live-preview" className="hover:text-slate-900 transition-colors">
-              Live Chat
-            </a>
             <a href="#how-it-works" className="hover:text-slate-900 transition-colors">
               How it Works
+            </a>
+            <a href="#privacy" className="hover:text-slate-900 transition-colors">
+              Privacy
             </a>
             <button
               type="button"
